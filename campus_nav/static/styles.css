@@ -1,0 +1,709 @@
+/* ===================================================================== palette
+   PolyU brand colours, sampled from PolyU GenAI website.
+
+   EVERY colour in this file is a var() pointing at one of these names.
+   Change a value here and the whole application follows -- including the
+   campus map and the avatar face. Nothing below this block hard-codes a hex.
+   ========================================================================= */
+:root {
+  /* -- PolyU brand -- */
+  --polyu-red:        #a02338;
+  --polyu-red-dark:   #892c3e;
+  --polyu-red-tint:   #f9eef0;
+
+  /* -- surfaces -- */
+  --bg:               #f4efef;
+  --bg-glow:          #f0dfe2;
+  --panel:            #ffffff;
+  --panel-2:          #f8f2f3;
+  --panel-glass:      rgba(255, 255, 255, .92);
+  --line:             #e8dcdd;
+  --line-strong:      #cdb4b9;
+
+  /* -- text -- */
+  --text:             #2a1f22;
+  --muted:            #7d6b70;
+  --on-accent:        #ffffff;
+  --on-accent-dim:    rgba(255, 255, 255, .72);
+
+  /* -- accent (everything "brand coloured" reads from here) -- */
+  --accent:           var(--polyu-red);
+  --accent-dark:      var(--polyu-red-dark);
+  --accent-soft:      var(--polyu-red-tint);
+  --accent-ring:      rgba(166, 53, 71, .25);
+
+  /* -- semantic -- */
+  --ok:               #1c7a54;
+  --ok-line:          #b7e0cf;
+  --warn:             #9a6410;
+  --warn-line:        #ecd7ae;
+  --danger:           #b3261e;
+  --danger-soft:      #fdeceb;
+
+  /* -- facility categories (legend + map pins) -- */
+  --cat-recycle:      #2f8f6b;   /* green   */
+  --cat-water:        #2b6cb0;   /* blue    */
+  --cat-toilet:       #0f766e;   /* teal    */
+  --cat-aed:          #b3261e;   /* red     */
+  --cat-food:         #b45309;   /* amber   */
+  --cat-service:      #6b5b95;   /* purple  */
+
+  /* -- the route -------------------------------------------------------------
+     Not the brand red: the building walls are rust (109, 48, 16), so a red line
+     disappears into the model. Navy is the one hue that appears nowhere else on the
+     map -- walls are rust, roofs grey, water pale blue, lawns green -- and it reads as
+     "this is the way" without shouting. */
+  --route:            #173a7a;
+  --route-casing:     #ffffff;
+  --route-pin:        #0d2148;   /* the solid centre of each stop */
+
+  /* -- campus map -- */
+  --map-bg:           #f2efe9;   /* warm land, like a real basemap */
+  --edge:             #ffffff;   /* roads read white against the land */
+  --edge-casing:      #dcd7cd;
+  --edge-stairs:      #a8977f;   /* the rungs that mark a flight of steps */
+  --node:             #e6dfd4;
+  --node-line:        #c7bfb1;
+
+  /* -- basemap treatment ------------------------------------------------------
+     The tiles are desaturated so the overlay is the only thing in colour. One
+     value to tune: 1 = fully grey, 0 = the original colour map. */
+  --basemap-grey:     grayscale(1) contrast(.92) brightness(1.12);
+
+  /* -- illustrated buildings: the 2.5D extrusion -----------------------------
+     One material for the whole campus -- PolyU red walls, grey roofs -- so the
+     drawing reads as a single model rather than a patchwork. Depth comes from the
+     paint order, never from per-building colour. */
+  --fp-roof:          #d6d2cc;
+  --fp-roof-line:     #b9b4ad;
+  --fp-roof-inner:    #c4bfb8;   /* the parapet ring, inset on the roof */
+  --fp-wall:          #a02338;   /* rgb(109, 48, 16) -- the face lit by the sun */
+  --fp-wall-dark:     #861225;   /* the face turned away from it */
+  --fp-height:        20;        /* metres of extrusion at full scale */
+
+  /* The one exception: a block in the file may ask for "tone": "grey". Grey rather
+     than white, because a white block on a near-white basemap disappears. */
+  --fp-grey-line:     #686663;
+  --fp-grey-roof:     #dcd9d5;
+  --fp-grey-inner:    #cfccc7;
+  --fp-grey-wall:     #b3b0ad;
+  --fp-grey-wall-dark: #a6a29c;
+
+  --fp-bridge:        #d9d2c6;   /* covered walkways / bridges -- flat */
+  --fp-water:         #a8cbe4;   /* pools, ponds -- drawn flat */
+  --fp-plaza:         #e7dfd2;   /* paved squares -- walked on, not built */
+  --fp-green:         #cfe0c2;   /* lawns, courts -- drawn flat */
+
+  /* -- avatar (robot: white shell, black visor, PolyU red chassis) -- */
+  --avatar-shell:     #ffffff;
+  --avatar-shell-lo:  #e6dce0;
+  --avatar-visor:     #0f0b12;
+  --avatar-ink:       #14101a;
+  --avatar-ink-soft:  #241c26;
+  --avatar-red:       var(--polyu-red);
+  --avatar-red-dark:  var(--polyu-red-dark);
+  --avatar-red-light: #d06475;
+  --avatar-halo:      var(--polyu-red);
+  --avatar-eyeglow:   #ff4d63;
+
+  /* -- shape -- */
+  --radius:           16px;
+  --font: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: radial-gradient(1200px 700px at 15% -10%, var(--bg-glow), transparent), var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 15px;
+}
+
+/* ------------------------------------------------------------------ top bar */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 22px;
+  background: linear-gradient(160deg, var(--polyu-red), var(--polyu-red-dark));
+  color: var(--on-accent);
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand h1 { margin: 0; font-size: 17px; letter-spacing: .2px; color: var(--on-accent); }
+.brand .sub { margin: 2px 0 0; color: var(--on-accent-dim); font-size: 12px; }
+.logo {
+  display: grid; place-items: center;
+  width: 36px; height: 36px; border-radius: 11px;
+  background: var(--on-accent); color: var(--polyu-red);
+  font-size: 18px; font-weight: 700;
+}
+.status { display: flex; gap: 8px; flex-wrap: wrap; }
+/* white pills on the red band: legible, and they read as "status lights" */
+.pill {
+  padding: 5px 11px; border-radius: 999px; font-size: 12px;
+  border: 1px solid transparent; color: var(--muted); background: var(--panel);
+  white-space: nowrap;
+}
+.pill.ok { color: var(--ok); }
+.pill.warn { color: var(--warn); }
+
+/* round icon buttons on the red band */
+.round-btn {
+  width: 28px; height: 28px; border-radius: 50%; cursor: pointer;
+  display: inline-grid; place-items: center; padding: 0;
+  background: var(--on-accent); color: var(--polyu-red);
+  border: 1px solid transparent; font: 600 13px/1 var(--font);
+}
+.round-btn:hover { background: var(--accent-soft); }
+.round-btn:focus-visible { outline: 2px solid var(--on-accent); outline-offset: 2px; }
+
+/* (i) hover card */
+.tip-wrap { position: relative; display: inline-flex; }
+.tip-card {
+  position: absolute; top: calc(100% + 10px); right: 0; z-index: 40;
+  width: 330px; padding: 14px 16px;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .18);
+  font-size: 12.5px; line-height: 1.5;
+  opacity: 0; visibility: hidden; transform: translateY(-4px);
+  transition: opacity .12s, transform .12s, visibility .12s;
+}
+.tip-wrap:hover .tip-card,
+.tip-wrap:focus-within .tip-card { opacity: 1; visibility: visible; transform: none; }
+.tip-card h3 { margin: 0 0 6px; font-size: 13px; }
+.tip-card p { margin: 0 0 8px; color: var(--muted); }
+.tip-card ul { margin: 0 0 8px; padding-left: 16px; color: var(--text); }
+.tip-card li { margin-bottom: 6px; }
+.tip-card .src { color: var(--accent); font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; }
+.tip-card .tip-foot { font-size: 11.5px; color: var(--muted); margin-bottom: 0; }
+
+/* settings dialog */
+.modal {
+  position: fixed; inset: 0; z-index: 60;
+  display: grid; place-items: center;
+  background: rgba(28, 18, 21, .45); backdrop-filter: blur(3px);
+}
+.modal[hidden] { display: none; }
+.modal-card {
+  width: min(460px, calc(100vw - 32px));
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 18px 20px 16px; box-shadow: 0 24px 60px rgba(0, 0, 0, .25);
+}
+.modal-card header { display: flex; align-items: center; justify-content: space-between; }
+.modal-card h2 { margin: 0; font-size: 15px; }
+.modal-note { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 8px 0 14px; }
+.modal-note code, .tip-card code { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; }
+.field { display: block; margin-bottom: 12px; }
+.field span { display: block; font-size: 11.5px; color: var(--muted); margin-bottom: 4px; }
+.field input {
+  width: 100%; padding: 9px 11px; border-radius: 9px; font-size: 13px;
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+  font-family: var(--font);
+}
+.field input:focus { outline: none; border-color: var(--accent); }
+.modal-status { min-height: 16px; font-size: 12px; margin: 4px 0 12px; color: var(--muted); }
+.modal-status.ok { color: var(--ok); }
+.modal-status.err { color: var(--danger); }
+.modal-card footer { display: flex; gap: 8px; justify-content: flex-end; }
+.modal-card footer button {
+  padding: 9px 15px; border-radius: 10px; cursor: pointer; font-size: 13px; font-family: var(--font);
+  background: var(--accent); color: var(--on-accent); border: none;
+}
+.modal-card footer .ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+
+/* ------------------------------------------------------------------- layout */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(430px, 1fr) minmax(420px, 1.1fr);
+  gap: 14px;
+  padding: 14px;
+  height: calc(100vh - 66px);
+}
+@media (max-width: 1180px) {
+  .layout { grid-template-columns: 1fr; height: auto; }
+  .map-panel { min-height: 460px; }
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+.panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid var(--line);
+}
+.panel-head h2 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); }
+
+/* ------------------------------------------------------------------- avatar
+   The avatar is not a panel any more: it is docked directly above the composer,
+   inside the conversation. It "floats" because of the negative top margin and the
+   shadow -- not because of position:absolute, which would cover the messages. */
+.avatar-dock {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 16px 8px;            /* same 16px gutter as the chat bubbles */
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 8px 20px var(--accent-ring);
+  position: relative;
+  z-index: 2;
+}
+.avatar-dock .avatar { width: 88px; height: 88px; flex: 0 0 auto; }
+.avatar-meta { display: flex; flex-direction: column; gap: 7px; min-width: 0; flex: 1; }
+.avatar-state {
+  align-self: flex-start;
+  font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--muted); background: var(--panel-2); border: 1px solid var(--line);
+  padding: 2px 9px; border-radius: 999px;
+}
+/* ---- paint: every colour reads from the --avatar-* tokens above -----------
+   The gradient stops and the eye glow carry classes rather than literal hexes,
+   so re-colouring the robot is still one edit at the top of this file. */
+.avatar .halo-in  { stop-color: var(--avatar-halo); stop-opacity: .26; }
+.avatar .halo-out { stop-color: var(--avatar-halo); stop-opacity: 0; }
+.avatar .shell-hi { stop-color: var(--avatar-shell); }
+.avatar .shell-lo { stop-color: var(--avatar-shell-lo); }
+.avatar .torso-hi { stop-color: var(--avatar-red); }
+.avatar .torso-lo { stop-color: var(--avatar-red-dark); }
+.avatar .eglow    { flood-color: var(--avatar-eyeglow); flood-opacity: .9; }
+
+.avatar .torso   { fill: url(#avatar-torso); stroke: var(--avatar-ink); stroke-width: 3.6; stroke-linejoin: round; }
+.avatar .collar  { fill: none; stroke: var(--avatar-red-light); stroke-width: 4.5; stroke-linecap: round; opacity: .95; }
+.avatar .joint   { fill: var(--avatar-ink-soft); stroke: var(--avatar-ink); stroke-width: 2.4; }
+.avatar .jointin { fill: var(--avatar-red); }
+.avatar .badge   { fill: var(--avatar-shell); opacity: .92; }
+.avatar .badge-l { fill: var(--avatar-ink); opacity: .55; }
+.avatar .flange  { fill: var(--avatar-red-dark); stroke: var(--avatar-ink); stroke-width: 2.6; }
+.avatar .neck    { fill: var(--avatar-ink-soft); stroke: var(--avatar-ink); stroke-width: 2.4; }
+.avatar .rib     { fill: var(--avatar-red-light); opacity: .75; }
+.avatar .stem    { fill: var(--avatar-ink-soft); stroke: var(--avatar-ink); stroke-width: 1.6; }
+.avatar .bulb    { fill: var(--avatar-red); stroke: var(--avatar-ink); stroke-width: 1.8;
+                   transform-box: fill-box; transform-origin: 50% 50%; }
+.avatar .bulb-hl { fill: var(--avatar-shell); opacity: .85; }
+.avatar .pod     { fill: var(--avatar-red); stroke: var(--avatar-ink); stroke-width: 2.4; }
+.avatar .pod-in  { fill: var(--avatar-shell); }
+.avatar .skull   { fill: url(#avatar-shell); stroke: var(--avatar-ink); stroke-width: 3.6; }
+.avatar .visor   { fill: var(--avatar-visor); stroke: var(--avatar-ink); stroke-width: 2.4; }
+.avatar .eye     { fill: var(--avatar-shell); filter: url(#avatar-eyeglow); }
+.avatar .smile   { fill: none; stroke: var(--avatar-shell); stroke-width: 4.5; stroke-linecap: round; }
+.avatar .frown   { fill: none; stroke: var(--avatar-red-light); stroke-width: 4.5; stroke-linecap: round; }
+.avatar .xarms   { fill: none; stroke: var(--avatar-red-light); stroke-width: 4.5; stroke-linecap: round; }
+.avatar .earicon { fill: none; stroke: var(--avatar-shell); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.avatar .waves2  { fill: none; stroke: var(--avatar-shell); stroke-width: 3.2; stroke-linecap: round; }
+.avatar .dots circle { fill: var(--avatar-shell); }
+.avatar .tdots circle { fill: var(--avatar-shell); }
+/* ---- what each state shows ----------------------------------------------
+   Five class names, mutually exclusive (setAvatar() in app.js removes all of
+   them and adds one). Everything but the eyes is hidden by default. */
+.avatar .smile, .avatar .dots, .avatar .tdots,
+.avatar .earicon, .avatar .waves2, .avatar .xarms, .avatar .frown { opacity: 0; transition: opacity .1s; }
+
+.avatar .eyes { transition: opacity .12s; animation: blink 5.5s infinite; transform-origin: 100px 63px; }
+@keyframes blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  94%, 96% { transform: scaleY(.08); }
+}
+@keyframes pulser { 0%, 100% { opacity: .45; transform: scale(.9); } 50% { opacity: 1; transform: scale(1); } }
+@keyframes earwave { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
+@keyframes dotwave { 0%, 60%, 100% { opacity: .22; } 30% { opacity: 1; } }
+@keyframes tdot { from { transform: scale(.45); } to { transform: scale(1.15); } }
+
+/* idle: a small smile, antenna breathing */
+.avatar.idle .smile { opacity: .85; }
+.avatar.idle .bulb { animation: pulser 2.8s infinite ease-in-out; }
+
+/* listening: an ear with two sound waves; the face gets out of the way */
+.avatar.listening .eyes, .avatar.listening .smile { opacity: 0; }
+.avatar.listening .earicon { opacity: .95; }
+.avatar.listening .waves2 { opacity: .9; animation: earwave 1.4s infinite ease-in-out; }
+.avatar.listening .waves2.w2 { animation-delay: .2s; }
+.avatar.listening .bulb { animation: pulser 1.1s infinite ease-in-out; }
+.avatar.listening .pod { animation: pulser 1.5s infinite ease-in-out; }
+
+/* thinking: three dots, no eyes */
+.avatar.thinking .eyes { opacity: 0; }
+.avatar.thinking .dots { opacity: .92; }
+.avatar.thinking .dots circle { animation: dotwave 1.15s infinite ease-in-out; }
+.avatar.thinking .dots circle:nth-child(2) { animation-delay: .16s; }
+.avatar.thinking .dots circle:nth-child(3) { animation-delay: .32s; }
+.avatar.thinking .bulb { animation: pulser .9s infinite ease-in-out; }
+
+/* speaking: three dots at mouth height, each on its own period so the
+   pattern never visibly repeats */
+.avatar.speaking .tdots { opacity: 1; }
+.avatar.speaking .tdots circle { animation: tdot .5s infinite alternate ease-in-out;
+  transform-box: fill-box; transform-origin: 50% 50%; }
+.avatar.speaking .tdots circle:nth-child(1) { animation-duration: .42s; }
+.avatar.speaking .tdots circle:nth-child(2) { animation-duration: .58s; animation-delay: .07s; }
+.avatar.speaking .tdots circle:nth-child(3) { animation-duration: .34s; animation-delay: .13s; }
+.avatar.speaking .bulb { animation: pulser .42s infinite alternate ease-in-out; }
+
+/* error: X eyes and a frown. A flash, not a resting state -- app.js returns
+   to idle after 2.6 s (see setAvatar). */
+.avatar.error .eyes { opacity: 0; }
+.avatar.error .xarms, .avatar.error .frown { opacity: 1; }
+.avatar.error .bulb, .avatar.error .pod { fill: var(--avatar-red-dark); }
+
+/* the OS says "less motion": no blink, no pulses -- the states still switch */
+@media (prefers-reduced-motion: reduce) {
+  .avatar, .avatar * { animation: none !important; transition: none !important; }
+}
+
+/* ---------------------------------------------------------- voice controls */
+.voice-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.icon-btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 13px; border-radius: 11px; cursor: pointer;
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--line); font-size: 13px; font-family: var(--font);
+  transition: border-color .15s, background .15s;
+}
+.icon-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.icon-btn:hover { border-color: var(--line-strong); }
+.icon-btn.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.icon-btn.recording { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); animation: pulse 1.1s infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 6px var(--accent-ring); } }
+.icon-btn:disabled { opacity: .45; cursor: not-allowed; }
+.select-wrap select {
+  padding: 8px 10px; border-radius: 11px; background: var(--panel-2);
+  color: var(--text); border: 1px solid var(--line); font-family: var(--font); font-size: 13px;
+}
+.hint { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.4; }
+
+/* --------------------------------------------------------------------- chat */
+.chat {
+  flex: 1; overflow-y: auto; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 12px; min-height: 0;
+}
+.msg { display: flex; flex-direction: column; gap: 5px; max-width: 100%; }
+.msg .who { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.msg .bubble {
+  padding: 11px 13px; border-radius: 13px; line-height: 1.5;
+  white-space: pre-wrap; word-wrap: break-word; font-size: 14px;
+}
+.msg.user { align-items: flex-end; }
+.msg.user .bubble {
+  background: var(--accent); color: var(--on-accent);
+  border-top-right-radius: 4px;      /* the tail sits at the top, on your side */
+}
+.msg.bot .bubble {
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-top-left-radius: 4px;       /* and at the top on the navigator's side */
+}
+.msg.bot .bubble .seg { color: var(--muted); font-size: 12.5px; }
+
+/* The spoken/lead sentence: what a person actually wants first.
+   The numbers behind it stay one click away instead of being deleted. */
+.msg.bot .bubble .lead { font-size: 14.5px; line-height: 1.55; }
+.msg.bot .bubble details { margin-top: 8px; border-top: 1px dashed var(--line); padding-top: 6px; }
+.msg.bot .bubble summary {
+  cursor: pointer; color: var(--muted); font-size: 11.5px;
+  letter-spacing: .04em; list-style: none;
+}
+.msg.bot .bubble summary::-webkit-details-marker { display: none; }
+.msg.bot .bubble summary::before { content: '▸ '; }
+.msg.bot .bubble details[open] summary::before { content: '▾ '; }
+.msg.bot .bubble summary:hover { color: var(--text); }
+.msg.bot .bubble details > span { display: block; margin-top: 6px; }
+.msg .tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.tag {
+  font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted);
+}
+.tag.llm { color: var(--accent); border-color: var(--line-strong); }
+
+/* a quiet caption, not a badge: it documents which parser ran without shouting */
+.tag-parser {
+  font-size: 10px; font-style: italic; letter-spacing: .01em;
+  text-transform: none; color: var(--muted); opacity: .75;
+  padding: 0; border: none; background: none;
+}
+.tag.ok { color: var(--ok); border-color: var(--ok-line); }
+.tag.warn { color: var(--warn); border-color: var(--warn-line); }
+.cards { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.card {
+  border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px;
+  background: var(--panel-2); font-size: 12.5px; cursor: pointer;
+}
+.card:hover { border-color: var(--accent); }
+.card b { color: var(--accent-dark); font-weight: 600; }
+.card .meta { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+
+.composer { display: flex; gap: 8px; padding: 12px 16px; }
+.composer input {
+  flex: 1; padding: 11px 13px; border-radius: 11px; font-size: 14px;
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--text); font-family: var(--font);
+}
+.composer input:focus { outline: none; border-color: var(--accent); }
+.composer button, .ghost {
+  padding: 10px 16px; border-radius: 11px; cursor: pointer; font-family: var(--font); font-size: 13px;
+  background: var(--accent); border: none; color: var(--on-accent);
+}
+.ghost { background: transparent; border: 1px solid var(--line); color: var(--muted); padding: 6px 12px; }
+.ghost:hover { color: var(--text); }
+
+/* ---------------------------------------------------------------------- map */
+.map-panel { min-height: 0; }
+.map-hint { font-size: 11px; color: var(--muted); }
+
+/* ------------------------------------------------------------------ map search
+   A single search field over the map, the interaction every map app opens with:
+   type a place, pick it, get the route. */
+.map-search { position: absolute; left: 12px; top: 12px; right: 62px; z-index: 6; }
+.map-search input {
+  width: 100%; padding: 10px 14px; border-radius: 10px; font-size: 13px;
+  background: var(--panel); border: 1px solid var(--line); color: var(--text);
+  font-family: var(--font); box-shadow: 0 6px 18px var(--accent-ring);
+}
+.map-search input:focus { outline: none; border-color: var(--accent); }
+.search-results {
+  margin-top: 6px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; overflow: hidden; max-height: 262px; overflow-y: auto;
+  box-shadow: 0 14px 30px var(--accent-ring);
+}
+.search-results[hidden] { display: none; }
+.search-hit {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 12px; cursor: pointer; font-size: 12.5px;
+  border-bottom: 1px solid var(--panel-2);
+}
+.search-hit:last-child { border-bottom: none; }
+.search-hit:hover, .search-hit.active { background: var(--accent-soft); }
+.search-hit i { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
+.search-hit .where { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.search-empty { padding: 10px 12px; font-size: 12px; color: var(--muted); }
+
+/* legend + category filters, in the bottom-left corner the way a printed campus map
+   carries its key. width: max-content means the panel is exactly as wide as the chips
+   in it, so adding or removing a toggle never leaves a gap or forces a wrap. */
+.map-legend {
+  position: absolute; left: 12px; bottom: 30px; z-index: 4;
+  width: max-content; max-width: 260px;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 9px 11px; border-radius: 12px;
+  background: var(--panel-glass); border: 1px solid var(--line);
+  box-shadow: 0 6px 18px var(--accent-ring);
+  backdrop-filter: blur(6px);
+  font-size: 11px; color: var(--muted);
+}
+.legend-row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.swatch { width: 16px; height: 3px; border-radius: 2px; display: inline-block; }
+.swatch.path { background: var(--edge); }
+.swatch.route { background: var(--route); height: 4px; }
+
+.legend-cats { display: flex; flex-wrap: wrap; gap: 5px; max-width: 196px; }
+.legend-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 8px; border-radius: 999px; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--line);
+  color: var(--muted); font-size: 10.5px; font-family: var(--font);
+  transition: opacity .15s, border-color .15s;
+}
+.legend-chip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+/* the master toggles carry a swatch in the shape of what they control */
+.legend-chip i.sw-line  { width: 12px; height: 3px; border-radius: 2px; background: var(--edge-casing); }
+.legend-chip i.sw-door  { background: var(--accent); border-radius: 1px; }
+.legend-chip[data-cat="recycle"] i { background: var(--cat-recycle); }
+.legend-chip[data-cat="water"]   i { background: var(--cat-water); }
+.legend-chip[data-cat="toilet"]  i { background: var(--cat-toilet); }
+.legend-chip[data-cat="aed"]     i { background: var(--cat-aed); }
+.legend-chip[data-cat="food"]    i { background: var(--cat-food); }
+.legend-chip[data-cat="service"] i { background: var(--cat-service); }
+.legend-chip:hover { border-color: var(--line-strong); color: var(--text); }
+.legend-chip.off { opacity: .4; text-decoration: line-through; }
+.legend-actions { display: flex; gap: 6px; }
+.legend-actions button {
+  flex: 1; padding: 4px 0; border-radius: 8px; cursor: pointer;
+  font-family: var(--font); font-size: 10.5px;
+  background: var(--panel); color: var(--muted); border: 1px solid var(--line);
+}
+.legend-actions button:hover { color: var(--text); border-color: var(--line-strong); }
+
+/* the scale bar and compass: what turns a drawing into a map */
+/* --------------------------------------------------------------- basemap layer
+   With real tiles underneath, our own diagram steps back: the network reads as a
+   thin grey overlay, and the fake shadows/trees disappear because the map already
+   has its own. */
+.tile { pointer-events: none; filter: var(--basemap-grey); }
+
+/* ------------------------------------------------------- extruded footprints
+   Three flat tones are all the illustration trick needs: a lit roof, a wall in
+   shade, and a wall in deeper shade. Depth comes from the sort order, not from
+   shading maths. */
+.fp-wall      { fill: var(--fp-wall); stroke: none; }
+.fp-wall-dark { fill: var(--fp-wall-dark); stroke: none; }
+.fp-roof      { fill: var(--fp-roof); stroke: var(--fp-roof-line); stroke-width: .8; }
+
+/* zone tints: roofs take the zone colour, walls a darker wash of it */
+.fp-flat     { stroke: none; opacity: .9; }
+.fp-flat-water { fill: var(--fp-water); }
+.fp-flat-plaza { fill: var(--fp-plaza); stroke: var(--line-strong); stroke-width: .8;
+                 stroke-dasharray: 6 4; }
+.fp-flat-bridge { fill: var(--fp-bridge); stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 4 3; }
+
+/* a drawn path is a line, never a block */
+.fp-path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.fp-path-path   { stroke: var(--edge-casing); stroke-width: 3; }
+.fp-path-bridge { stroke: var(--line-strong); stroke-width: 3.5; stroke-dasharray: 5 4; }
+.fp-flat-green { fill: var(--fp-green); }
+.fp-flat-pitch { fill: var(--fp-green); stroke: var(--panel); stroke-width: 1; }
+.fp-shadow   { fill: #2f2a2f; opacity: .16; }
+.fp-roof-inner { stroke: none; opacity: .55; fill: var(--fp-roof-inner); }
+
+/* "tone": "grey" in the file -- the block is drawn grey instead of red.
+   Set once, on the buildings that deserve to stand apart. */
+.tone-grey.fp-wall      { fill: var(--fp-grey-wall); }
+.tone-grey.fp-wall-dark { fill: var(--fp-grey-wall-dark); }
+.tone-grey.fp-roof      { fill: var(--fp-grey-roof); stroke: var(--fp-grey-line); }
+.tone-grey.fp-roof-inner { fill: var(--fp-grey-inner); opacity: 1; }
+
+/* over the street map, the blocks are slightly translucent so the map reads through */
+#map.basemap #layer-footprints { opacity: .92; }
+#map.basemap .fp-roof { stroke: var(--panel); stroke-width: 1.1; }
+
+/* with extruded blocks on screen, the schematic squares step aside */
+#map.footprints .node.building rect { display: none; }
+/* the letter moves onto the roof, so the schematic one is hidden */
+#map.footprints .node.building .node-code { display: none; }
+.roof-code {
+  fill: var(--polyu-red-dark); font-size: 11px; font-weight: 700;
+  font-family: var(--font); text-anchor: middle; pointer-events: none;
+  paint-order: stroke; stroke: var(--panel); stroke-width: 2.4; stroke-linejoin: round;
+}
+#map.footprints .node-shadow, #map.footprints .tree { display: none; }
+#map.basemap .edge-casing { stroke: var(--panel); opacity: .75; stroke-width: 6; }
+#map.basemap .edge { stroke: var(--muted); opacity: .55; stroke-width: 2.5; }
+#map.basemap .edge-stairs { stroke: var(--accent); opacity: .7; }
+#map.basemap .node-shadow,
+#map.basemap .tree { display: none; }
+#map.basemap .node.building rect { fill: var(--panel); opacity: .62; stroke: var(--accent); }
+#map.basemap .node.building .node-code { fill: var(--polyu-red); stroke: none; }
+#map.basemap .node.service circle { stroke: var(--panel); }
+#map.basemap .node-label { stroke: var(--panel); stroke-width: 3.2; }
+
+/* only visible while a route is on the map, in the route colour */
+.route-badge {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 12px;
+  padding: 5px 12px; border-radius: 999px;
+  background: var(--route); color: var(--route-casing);
+  font-size: 11.5px; font-weight: 600; letter-spacing: .02em;
+  box-shadow: 0 6px 16px var(--accent-ring);
+  z-index: 3;
+}
+.route-badge[hidden] { display: none; }
+.route-badge.failed { background: var(--danger); box-shadow: 0 6px 16px rgba(179, 38, 30, .28); }
+
+.map-north {
+  position: absolute; right: 14px; bottom: 36px;
+  display: flex; flex-direction: column; align-items: center;
+  font-size: 10px; font-weight: 700; color: var(--muted); letter-spacing: .1em;
+}
+.map-north span { font-size: 11px; line-height: 1; }
+.map-scale {
+  position: absolute; left: 14px; bottom: 36px;
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10.5px; color: var(--muted);
+}
+.map-scale b {
+  display: block; height: 5px; width: 60px;
+  border: 1px solid var(--muted); border-top: none;
+}
+
+.map-wrap { position: relative; flex: 1; min-height: 0; background: var(--map-bg); }
+#map { width: 100%; height: 100%; display: block; cursor: grab; }
+#map.dragging { cursor: grabbing; }
+
+/* the walkway network is scaffolding, not map furniture: hidden unless asked for */
+#map.no-links #layer-edges { display: none; }
+
+.edge-casing {
+  stroke: var(--edge-casing); stroke-width: 9; fill: none;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.edge {
+  stroke: var(--edge); stroke-width: 4; fill: none;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+/* a flight of steps: rungs across the link, so it cannot be mistaken for a slope */
+.edge-stairs { stroke: var(--edge-stairs); stroke-width: 1.1; stroke-linecap: butt; }
+.node { cursor: pointer; }
+.node.building rect {
+  fill: var(--node); stroke: var(--node-line); stroke-width: 1.4;
+  filter: drop-shadow(0 1px 2px var(--accent-ring));
+}
+/* a cheap 2.5D hint: a second block offset down-right, read as the shadowed face */
+/* the letter inside a building block: Core A, Block L, Block VA */
+.node-code {
+  fill: var(--polyu-red-dark); font-size: 10.5px; font-weight: 700;
+  font-family: var(--font); text-anchor: middle; pointer-events: none;
+  paint-order: stroke; stroke: var(--panel); stroke-width: 2.2; stroke-linejoin: round;
+}
+.node.entrance .node-code { fill: var(--on-accent); stroke: none; }
+.node-shadow { fill: var(--node-line); opacity: .28; }
+.node:hover .node-shadow { fill: var(--accent); opacity: .2; }
+.tree { fill: var(--cat-recycle); opacity: .35; }
+
+.node.entrance rect { fill: var(--accent); stroke: var(--on-accent); stroke-width: 1.6; }
+/* "Main Locations" (Alumni Atrium, Amenities Centre, Campus Control Centre ...): an
+   outlined block, not a filled one. Without this rule the rect had no fill at all and
+   SVG paints an unstyled rect black. */
+.node.place rect { fill: var(--panel); stroke: var(--accent); stroke-width: 1.4; }
+.node.place .node-code { fill: var(--accent-dark); stroke: none; }
+.node.service circle { fill: var(--accent); stroke: var(--on-accent); stroke-width: 1.2; }
+.node.service.cat-recycle circle { fill: var(--cat-recycle); }
+.node.service.cat-water circle   { fill: var(--cat-water); }
+.node.service.cat-toilet circle  { fill: var(--cat-toilet); }
+.node.service.cat-aed circle     { fill: var(--cat-aed); }
+.node.service.cat-food circle    { fill: var(--cat-food); }
+.node.service.cat-service circle { fill: var(--cat-service); }
+.node.dim { display: none; }
+.node:hover rect, .node:hover circle { fill: var(--accent); }
+.node-label {
+  fill: var(--muted); font-size: 11px; font-family: var(--font);
+  paint-order: stroke; stroke: var(--map-bg); stroke-width: 3; pointer-events: none;
+}
+/* the white casing underneath is what makes a route read on any background */
+.route-casing {
+  stroke: var(--route-casing); stroke-width: 12; fill: none; stroke-linecap: round;
+  stroke-linejoin: round; opacity: .92;
+}
+.route-line {
+  stroke: var(--route); stroke-width: 6; fill: none; stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.route-dot { fill: var(--route-casing); stroke: var(--route); stroke-width: 2; }
+.route-pin { fill: var(--route-pin); }
+.fac-pin { fill: none; stroke: var(--warn); stroke-width: 3; }
+.fac-pin.pulse { animation: facPulse 1.6s infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes facPulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+
+.map-tools { position: absolute; right: 12px; top: 12px; display: flex; flex-direction: column; gap: 6px; z-index: 6; }
+.map-tools button {
+  width: 34px; height: 34px; border-radius: 8px; cursor: pointer; font-size: 15px;
+  background: var(--panel); color: var(--text); border: 1px solid var(--line);
+  box-shadow: 0 2px 8px var(--accent-ring);
+}
+.map-tools button.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.map-tools button:hover { border-color: var(--accent); }
+.map-tip {
+  position: absolute; left: 12px; bottom: 30px; font-size: 11.5px; color: var(--muted);
+  background: var(--panel-glass); border: 1px solid var(--line); border-radius: 8px; padding: 5px 9px;
+  pointer-events: none; opacity: 0; transition: opacity .15s;
+}
+.map-tip.show { opacity: 1; }
+.attrib {
+  position: absolute; right: 12px; bottom: 8px; font-size: 10.5px; color: var(--muted); text-align: right;
+}

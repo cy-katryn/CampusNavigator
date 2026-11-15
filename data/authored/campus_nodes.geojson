@@ -1,0 +1,2102 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.180453,
+     22.303956
+    ]
+   },
+   "properties": {
+    "timestamp": "2019-11-24T11:55:45Z",
+    "version": "6",
+    "changeset": "77480157",
+    "user": "green_leek",
+    "uid": "3559445",
+    "entrance": "yes",
+    "id": "node/1360562360"
+   },
+   "id": "node/1360562360"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.180465,
+     22.304745
+    ]
+   },
+   "properties": {
+    "timestamp": "2019-11-28T02:46:07Z",
+    "version": "6",
+    "changeset": "77658829",
+    "user": "green_leek",
+    "uid": "3559445",
+    "entrance": "yes",
+    "id": "node/2322110358"
+   },
+   "id": "node/2322110358"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179822,
+     22.303865
+    ]
+   },
+   "properties": {
+    "timestamp": "2019-11-25T03:14:58Z",
+    "version": "4",
+    "changeset": "77498001",
+    "user": "green_leek",
+    "uid": "3559445",
+    "entrance": "yes",
+    "id": "node/2322147309",
+    "parent": "Li Ka Shing Tower"
+   },
+   "id": "node/2322147309"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179507,
+     22.303948
+    ]
+   },
+   "properties": {
+    "timestamp": "2019-11-25T03:14:58Z",
+    "version": "4",
+    "changeset": "77498001",
+    "user": "green_leek",
+    "uid": "3559445",
+    "entrance": "yes",
+    "id": "node/2322147311"
+   },
+   "id": "node/2322147311"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.178872,
+     22.302569
+    ]
+   },
+   "properties": {
+    "timestamp": "2015-04-28T11:09:30Z",
+    "version": "2",
+    "changeset": "30577442",
+    "user": "thomassth",
+    "uid": "1981398",
+    "access": "private",
+    "barrier": "lift_gate",
+    "bicycle": "no",
+    "foot": "no",
+    "id": "node/2406323720"
+   },
+   "id": "node/2406323720"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.178966,
+     22.303147
+    ]
+   },
+   "properties": {
+    "timestamp": "2026-03-12T12:50:30Z",
+    "version": "6",
+    "changeset": "179756875",
+    "user": "kingkingHK",
+    "uid": "16047452",
+    "entrance": "yes",
+    "id": "node/2406323795"
+   },
+   "id": "node/2406323795"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179214,
+     22.3044
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "5",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "brand": "7-Eleven",
+    "brand:wikidata": "Q259340",
+    "brand:wikipedia": "en:7-Eleven",
+    "name": "7-Eleven",
+    "operator": "7-eleven",
+    "shop": "convenience",
+    "id": "node/2411853270"
+   },
+   "id": "node/2411853270"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179282,
+     22.304504
+    ]
+   },
+   "properties": {
+    "timestamp": "2026-10-22T16:09:31Z",
+    "version": "11",
+    "changeset": "190892271",
+    "user": "oliverxu",
+    "uid": "24687969",
+    "amenity": "cafe",
+    "branch": "理工大學",
+    "brand": "星巴克 The starbucks",
+    "cuisine": "coffee_shop",
+    "internet_access:fee": "customers",
+    "name": "Starbucks",
+    "name:en": "Starbucks",
+    "name:zh": "星巴克",
+    "name:zh-Hans": "星巴克",
+    "name:zh-Hant": "星巴克",
+    "operator": "Starbucks cooperation",
+    "source:opening_hours": "survey",
+    "source:operator": "survey",
+    "wheelchair": "yes",
+    "id": "node/2411853271"
+   },
+   "id": "node/2411853271"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179056,
+     22.304551
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "7",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "amenity": "atm",
+    "brand": "中國銀行 Bank of China",
+    "brand:en": "Bank of China",
+    "brand:wikidata": "Q790068",
+    "brand:wikipedia": "en:Bank of China",
+    "brand:zh": "中國銀行（香港）",
+    "brand:zh-Hans": "中国银行（香港）",
+    "brand:zh-Hant": "中國銀行（香港）",
+    "name": "中國銀行（香港） Bank of China (Hong Kong)",
+    "name:en": "Bank of China (Hong Kong)",
+    "name:zh": "中國銀行（香港）",
+    "name:zh-Hans": "中国银行（香港）",
+    "name:zh-Hant": "中國銀行（香港）",
+    "official_name": "Bank of China",
+    "operator": "中國銀行 Bank of China",
+    "operator:wikidata": "Q790068",
+    "operator:wikipedia": "en:Bank of China",
+    "id": "node/2411853272"
+   },
+   "id": "node/2411853272"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.17924,
+     22.304618
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "8",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "branch": "香港理工大學書店Commercial Press Hong Kong Polytechnic University Bookstore",
+    "brand": "商務印書館 The Commercial Press",
+    "brand:en": "The Commercial Press",
+    "brand:wikidata": "Q10923130",
+    "brand:wikipedia": "zh:商務印書館（香港）",
+    "brand:zh": "商務印書館",
+    "brand:zh-Hans": "商务印书馆",
+    "brand:zh-Hant": "商務印書館",
+    "name": "商務印書館 The Commercial Press",
+    "name:en": "The Commercial Press",
+    "name:zh": "商務印書館",
+    "name:zh-Hans": "商务印书馆",
+    "name:zh-Hant": "商務印書館",
+    "opening_hours": "Mo-Fr 10:00-20:00; Sa 10:00-17:00",
+    "operator": "聯合出版（集團）有限公司 Sino United Publishing (Holdings) Limited",
+    "operator:en": "Sino United Publishing (Holdings) Limited",
+    "operator:wikidata": "Q15912494",
+    "operator:zh": "聯合出版（集團）有限公司",
+    "operator:zh-Hans": "联合出版（集团）有限公司",
+    "operator:zh-Hant": "聯合出版（集團）有限公司",
+    "owner": "聯合出版（集團）有限公司 Sino United Publishing (Holdings) Limited",
+    "owner:en": "Sino United Publishing (Holdings) Limited",
+    "owner:wikidata": "Q15912494",
+    "owner:wikipedia": "zh:聯合出版集團",
+    "owner:zh": "聯合出版（集團）有限公司",
+    "owner:zh-Hans": "联合出版（集团）有限公司",
+    "owner:zh-Hant": "聯合出版（集團）有限公司",
+    "shop": "books",
+    "source:opening_hours": "survey",
+    "id": "node/2411856405"
+   },
+   "id": "node/2411856405"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.180067,
+     22.304149
+    ]
+   },
+   "properties": {
+    "timestamp": "2018-04-01T19:51:05Z",
+    "version": "2",
+    "changeset": "57721114",
+    "user": "u25820",
+    "uid": "7773415",
+    "amenity": "cafe",
+    "cuisine": "indian",
+    "internet_access": "wlan",
+    "name": "草坪餐廳 Lawn Café",
+    "name:en": "Lawn Café",
+    "name:zh": "草坪餐廳",
+    "smoking": "no",
+    "id": "node/3483872383"
+   },
+   "id": "node/3483872383"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.1796,
+     22.304812
+    ]
+   },
+   "properties": {
+    "timestamp": "2024-06-22T12:31:44Z",
+    "version": "5",
+    "changeset": "153027678",
+    "user": "GasaiYuno",
+    "uid": "10054182",
+    "entrance": "main",
+    "exit": "main",
+    "id": "node/3483872384"
+   },
+   "id": "node/3483872384"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179964,
+     22.305424
+    ]
+   },
+   "properties": {
+    "timestamp": "2026-03-24T10:01:29Z",
+    "version": "2",
+    "changeset": "180344607",
+    "user": "Dundee930",
+    "uid": "20964582",
+    "amenity": "cafe",
+    "brand": "太平洋咖啡 Pacific Coffee",
+    "brand:en": "Pacific Coffee",
+    "brand:wikidata": "Q7122398",
+    "brand:zh": "太平洋咖啡",
+    "cuisine": "coffee_shop",
+    "name": "太平洋咖啡 Pacific Coffee",
+    "name:en": "Pacific Coffee",
+    "name:zh": "太平洋咖啡",
+    "takeaway": "yes",
+    "id": "node/5474794797"
+   },
+   "id": "node/5474794797"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.178985,
+     22.304603
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "2",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "amenity": "fast_food",
+    "brand": "Subway",
+    "brand:wikidata": "Q244457",
+    "cuisine": "sandwich",
+    "name": "Subway",
+    "takeaway": "yes",
+    "id": "node/5474794798"
+   },
+   "id": "node/5474794798"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.180608,
+     22.305765
+    ]
+   },
+   "properties": {
+    "timestamp": "2026-03-24T10:01:29Z",
+    "version": "3",
+    "changeset": "180344607",
+    "user": "Dundee930",
+    "uid": "20964582",
+    "amenity": "restaurant",
+    "brand": "PizzaExpress",
+    "brand:wikidata": "Q662845",
+    "cuisine": "pizza",
+    "name": "PizzaExpress",
+    "name:en": "PizzaExpress",
+    "id": "node/5474794799"
+   },
+   "id": "node/5474794799"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.178853,
+     22.303565
+    ]
+   },
+   "properties": {
+    "timestamp": "2026-06-30T15:00:57Z",
+    "version": "3",
+    "changeset": "184859427",
+    "user": "wheelmap_visitor",
+    "uid": "290680",
+    "amenity": "cafe",
+    "cuisine": "burger",
+    "name": "American Diner",
+    "name:en": "American Diner",
+    "wheelchair": "limited",
+    "id": "node/5474794817"
+   },
+   "id": "node/5474794817"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.178126,
+     22.302907
+    ]
+   },
+   "properties": {
+    "timestamp": "2026-06-30T15:00:15Z",
+    "version": "5",
+    "changeset": "184859382",
+    "user": "wheelmap_visitor",
+    "uid": "290680",
+    "access": "yes",
+    "amenity": "clinic",
+    "healthcare": "clinic",
+    "name": "大學醫療保健處 University Health Service",
+    "name:en": "University Health Service",
+    "name:zh": "大學醫療保健處",
+    "university": "yes",
+    "wheelchair": "yes",
+    "id": "node/5521019919"
+   },
+   "id": "node/5521019919"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.178492,
+     22.303075
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-11-04T08:30:57Z",
+    "version": "5",
+    "changeset": "174180594",
+    "user": "vectorial8192",
+    "uid": "10815817",
+    "access": "yes",
+    "amenity": "clinic",
+    "healthcare": "clinic",
+    "name": "結合保健診所 Integrative Health Clinic",
+    "name:en": "Integrative Health Clinic",
+    "name:zh": "結合保健診所",
+    "university": "yes",
+    "id": "node/5521019920"
+   },
+   "id": "node/5521019920"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.177795,
+     22.302978
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-11-04T08:30:57Z",
+    "version": "5",
+    "changeset": "174180594",
+    "user": "vectorial8192",
+    "uid": "10815817",
+    "access": "yes",
+    "amenity": "clinic",
+    "healthcare": "clinic",
+    "healthcare:speciality": "optometry",
+    "health_specialty:optometry": "main",
+    "name": "眼科視光學診所 Optometry Clinic",
+    "name:en": "Optometry Clinic",
+    "name:zh": "眼科視光學診所",
+    "university": "yes",
+    "id": "node/5521020321"
+   },
+   "id": "node/5521020321"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.178423,
+     22.303037
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-11-04T08:30:57Z",
+    "version": "4",
+    "changeset": "174180594",
+    "user": "vectorial8192",
+    "uid": "10815817",
+    "access": "yes",
+    "amenity": "clinic",
+    "healthcare": "clinic",
+    "health_specialty:physiatry": "main",
+    "health_specialty:physiotherapy": "main",
+    "name": "康復治療診所 Rehabilitation Clinic",
+    "name:en": "Rehabilitation Clinic",
+    "name:zh": "康復治療診所",
+    "university": "yes",
+    "id": "node/5521020322"
+   },
+   "id": "node/5521020322"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179756,
+     22.306663
+    ]
+   },
+   "properties": {
+    "timestamp": "2026-03-24T10:01:29Z",
+    "version": "4",
+    "changeset": "180344607",
+    "user": "Dundee930",
+    "uid": "20964582",
+    "amenity": "restaurant",
+    "name": "Z Canteen",
+    "name:en": "Z Canteen",
+    "operator": "泛亞飲食 Asia Pacific Catering",
+    "id": "node/5521020323"
+   },
+   "id": "node/5521020323"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.178518,
+     22.303115
+    ]
+   },
+   "properties": {
+    "timestamp": "2026-03-24T10:01:29Z",
+    "version": "3",
+    "changeset": "180344607",
+    "user": "Dundee930",
+    "uid": "20964582",
+    "amenity": "restaurant",
+    "cuisine": "korean",
+    "name": "劇院茶座 Theatre Lounge",
+    "name:en": "Theatre Lounge",
+    "name:zh": "劇院茶座",
+    "operator": "Terrace in Seaside",
+    "id": "node/5521020324"
+   },
+   "id": "node/5521020324"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179652,
+     22.303203
+    ]
+   },
+   "properties": {
+    "timestamp": "2026-06-30T15:01:39Z",
+    "version": "3",
+    "changeset": "184859466",
+    "user": "wheelmap_visitor",
+    "uid": "290680",
+    "amenity": "restaurant",
+    "name": "圖書館咖啡廳 LibCafe@PolyU",
+    "name:en": "LibCafe@PolyU",
+    "name:zh": "圖書館咖啡廳",
+    "operator": "金巴斯集團 Compass Group",
+    "wheelchair": "yes",
+    "id": "node/5521020325"
+   },
+   "id": "node/5521020325"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179599,
+     22.30543
+    ]
+   },
+   "properties": {
+    "timestamp": "2026-03-24T10:01:29Z",
+    "version": "2",
+    "changeset": "180344607",
+    "user": "Dundee930",
+    "uid": "20964582",
+    "amenity": "cafe",
+    "cuisine": "coffee_shop",
+    "name": "V Cafe",
+    "name:en": "V Cafe",
+    "takeaway": "yes",
+    "id": "node/5521020326"
+   },
+   "id": "node/5521020326"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179235,
+     22.304359
+    ]
+   },
+   "properties": {
+    "timestamp": "2018-04-01T20:21:12Z",
+    "version": "1",
+    "changeset": "57721779",
+    "user": "u25820",
+    "uid": "7773415",
+    "amenity": "toilets",
+    "id": "node/5521093735"
+   },
+   "id": "node/5521093735"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179895,
+     22.303624
+    ]
+   },
+   "properties": {
+    "timestamp": "2026-03-24T10:24:16Z",
+    "version": "6",
+    "changeset": "180345903",
+    "user": "Dundee930",
+    "uid": "20964582",
+    "access": "yes",
+    "advertising": "board",
+    "lit": "yes",
+    "message": "opinion",
+    "name": "民主牆 Democracy Wall",
+    "name:en": "Democracy Wall",
+    "name:zh": "民主牆",
+    "operator": "香港理工大學學生會 Hong Kong Polytechnic University Students' Union",
+    "id": "node/6333026808"
+   },
+   "id": "node/6333026808"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.180212,
+     22.303515
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-11-14T15:07:06Z",
+    "version": "3",
+    "changeset": "174652713",
+    "user": "vectorial8192",
+    "uid": "10815817",
+    "entrance": "yes",
+    "id": "node/6720246127"
+   },
+   "id": "node/6720246127"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179583,
+     22.306373
+    ]
+   },
+   "properties": {
+    "timestamp": "2019-11-28T02:46:07Z",
+    "version": "4",
+    "changeset": "77658829",
+    "user": "green_leek",
+    "uid": "3559445",
+    "entrance": "yes",
+    "id": "node/6834848016"
+   },
+   "id": "node/6834848016"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179209,
+     22.303958
+    ]
+   },
+   "properties": {
+    "timestamp": "2019-11-24T12:04:48Z",
+    "version": "1",
+    "changeset": "77480330",
+    "user": "green_leek",
+    "uid": "3559445",
+    "amenity": "parking_entrance",
+    "id": "node/7005925555"
+   },
+   "id": "node/7005925555"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.178741,
+     22.302519
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-11-02T10:53:12Z",
+    "version": "4",
+    "changeset": "174096635",
+    "user": "vectorial8192",
+    "uid": "10815817",
+    "barrier": "entrance",
+    "description": "Vehicle entrance",
+    "description:en": "Vehicle entrance",
+    "description:zh": "車輛入口處",
+    "entrance": "yes",
+    "exit": "yes",
+    "id": "node/7005925562",
+    "name": "Closed Entrance (Core C)",
+    "name:en": "Closed Entrance (Core C)",
+    "parent": "Core C",
+    "access": "no",
+    "routable": "no"
+   },
+   "id": "node/7005925562"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.180322,
+     22.303623
+    ]
+   },
+   "properties": {
+    "timestamp": "2022-06-23T09:12:21Z",
+    "version": "3",
+    "changeset": "122748371",
+    "user": "Kovoschiz",
+    "uid": "6250193",
+    "description": "Guard post",
+    "description:en": "Guard post",
+    "description:zh": "保安控制室",
+    "office": "security",
+    "operation": "private",
+    "ownership": "public",
+    "id": "node/7005955779"
+   },
+   "id": "node/7005955779"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.17943,
+     22.306612
+    ]
+   },
+   "properties": {
+    "timestamp": "2019-11-24T11:55:45Z",
+    "version": "1",
+    "changeset": "77480157",
+    "user": "green_leek",
+    "uid": "3559445",
+    "amenity": "toilets",
+    "id": "node/7005955780"
+   },
+   "id": "node/7005955780"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.180085,
+     22.305592
+    ]
+   },
+   "properties": {
+    "timestamp": "2019-11-24T11:55:45Z",
+    "version": "1",
+    "changeset": "77480157",
+    "user": "green_leek",
+    "uid": "3559445",
+    "amenity": "toilets",
+    "id": "node/7005955781"
+   },
+   "id": "node/7005955781"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179358,
+     22.305223
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "2",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "amenity": "toilets",
+    "id": "node/7005955782"
+   },
+   "id": "node/7005955782"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.178811,
+     22.304202
+    ]
+   },
+   "properties": {
+    "timestamp": "2019-11-24T11:55:45Z",
+    "version": "1",
+    "changeset": "77480157",
+    "user": "green_leek",
+    "uid": "3559445",
+    "amenity": "toilets",
+    "id": "node/7005955783"
+   },
+   "id": "node/7005955783"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.178663,
+     22.303619
+    ]
+   },
+   "properties": {
+    "timestamp": "2019-11-24T11:55:45Z",
+    "version": "1",
+    "changeset": "77480157",
+    "user": "green_leek",
+    "uid": "3559445",
+    "amenity": "toilets",
+    "id": "node/7005955784"
+   },
+   "id": "node/7005955784"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179025,
+     22.30297
+    ]
+   },
+   "properties": {
+    "timestamp": "2019-11-24T11:55:45Z",
+    "version": "1",
+    "changeset": "77480157",
+    "user": "green_leek",
+    "uid": "3559445",
+    "amenity": "toilets",
+    "id": "node/7005975485"
+   },
+   "id": "node/7005975485"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179312,
+     22.303161
+    ]
+   },
+   "properties": {
+    "timestamp": "2019-11-24T11:55:45Z",
+    "version": "1",
+    "changeset": "77480157",
+    "user": "green_leek",
+    "uid": "3559445",
+    "amenity": "toilets",
+    "id": "node/7005975486"
+   },
+   "id": "node/7005975486"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.180417,
+     22.303756
+    ]
+   },
+   "properties": {
+    "timestamp": "2019-11-24T11:55:45Z",
+    "version": "1",
+    "changeset": "77480157",
+    "user": "green_leek",
+    "uid": "3559445",
+    "amenity": "toilets",
+    "id": "node/7005975487"
+   },
+   "id": "node/7005975487"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.181053,
+     22.305475
+    ]
+   },
+   "properties": {
+    "timestamp": "2019-11-24T11:55:45Z",
+    "version": "1",
+    "changeset": "77480157",
+    "user": "green_leek",
+    "uid": "3559445",
+    "amenity": "toilets",
+    "id": "node/7005975488"
+   },
+   "id": "node/7005975488"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.180863,
+     22.305144
+    ]
+   },
+   "properties": {
+    "timestamp": "2019-11-24T11:55:45Z",
+    "version": "1",
+    "changeset": "77480157",
+    "user": "green_leek",
+    "uid": "3559445",
+    "amenity": "toilets",
+    "id": "node/7005975489"
+   },
+   "id": "node/7005975489"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.180725,
+     22.304661
+    ]
+   },
+   "properties": {
+    "timestamp": "2019-11-24T11:55:45Z",
+    "version": "1",
+    "changeset": "77480157",
+    "user": "green_leek",
+    "uid": "3559445",
+    "amenity": "toilets",
+    "id": "node/7005975490"
+   },
+   "id": "node/7005975490"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179994,
+     22.304895
+    ]
+   },
+   "properties": {
+    "timestamp": "2019-11-24T11:55:45Z",
+    "version": "1",
+    "changeset": "77480157",
+    "user": "green_leek",
+    "uid": "3559445",
+    "amenity": "toilets",
+    "id": "node/7005975491"
+   },
+   "id": "node/7005975491"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.17915,
+     22.305967
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-05-07T01:01:21Z",
+    "version": "2",
+    "changeset": "165915881",
+    "user": "Kovoschiz",
+    "uid": "6250193",
+    "barrier": "gate",
+    "id": "node/7015935469"
+   },
+   "id": "node/7015935469"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179612,
+     22.305264
+    ]
+   },
+   "properties": {
+    "timestamp": "2019-11-28T02:46:07Z",
+    "version": "1",
+    "changeset": "77658829",
+    "user": "green_leek",
+    "uid": "3559445",
+    "noexit": "yes",
+    "id": "node/7015935495"
+   },
+   "id": "node/7015935495"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.178618,
+     22.303788
+    ]
+   },
+   "properties": {
+    "timestamp": "2026-03-12T12:50:30Z",
+    "version": "4",
+    "changeset": "179756875",
+    "user": "kingkingHK",
+    "uid": "16047452",
+    "door": "yes",
+    "entrance": "yes",
+    "exit": "yes",
+    "id": "node/8315109503",
+    "parent": "Core H"
+   },
+   "id": "node/8315109503"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.178494,
+     22.303378
+    ]
+   },
+   "properties": {
+    "timestamp": "2026-03-12T12:50:30Z",
+    "version": "4",
+    "changeset": "179756875",
+    "user": "kingkingHK",
+    "uid": "16047452",
+    "door": "yes",
+    "entrance": "yes",
+    "exit": "yes",
+    "id": "node/8315109504",
+    "parent": "Core G"
+   },
+   "id": "node/8315109504"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.180429,
+     22.303634
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-11-14T15:07:06Z",
+    "version": "3",
+    "changeset": "174652713",
+    "user": "vectorial8192",
+    "uid": "10815817",
+    "entrance": "yes",
+    "id": "node/10314077713"
+   },
+   "id": "node/10314077713"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179348,
+     22.306715
+    ]
+   },
+   "properties": {
+    "timestamp": "2024-04-08T12:45:23Z",
+    "version": "1",
+    "changeset": "149734075",
+    "user": "vectorial8192",
+    "uid": "10815817",
+    "name": "SIMS Lab",
+    "note": "ZN 518, 5th Floor, Block Z, The Hong Kong Polytechnic University",
+    "office": "research",
+    "website": "https://www.simslab.net/",
+    "id": "node/11802010910"
+   },
+   "id": "node/11802010910"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.17954,
+     22.303769
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "2",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "height": "10",
+    "man_made": "flagpole",
+    "id": "node/13052310679"
+   },
+   "id": "node/13052310679"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.180716,
+     22.306124
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-12-04T13:39:39Z",
+    "version": "3",
+    "changeset": "175494654",
+    "user": "vectorial8192",
+    "uid": "10815817",
+    "entrance": "service",
+    "id": "node/13076945832",
+    "parent": "Lee Shau Kee Building"
+   },
+   "id": "node/13076945832"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179701,
+     22.306478
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "access": "yes",
+    "highway": "elevator",
+    "wheelchair": "yes",
+    "id": "node/13097959902"
+   },
+   "id": "node/13097959902"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179339,
+     22.306337
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "entrance": "staircase",
+    "id": "node/13097959906"
+   },
+   "id": "node/13097959906"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179527,
+     22.306526
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "highway": "elevator",
+    "id": "node/13097959907"
+   },
+   "id": "node/13097959907"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.180719,
+     22.305669
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "access": "yes",
+    "amenity": "drinking_water",
+    "bottle": "yes",
+    "fee": "no",
+    "indoor": "yes",
+    "wheelchair": "limited",
+    "id": "node/13097959968"
+   },
+   "id": "node/13097959968"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.180725,
+     22.305621
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "access": "yes",
+    "highway": "elevator",
+    "wheelchair": "yes",
+    "id": "node/13097959969"
+   },
+   "id": "node/13097959969"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179227,
+     22.304782
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "bin": "yes",
+    "capacity": "10",
+    "heating": "no",
+    "leisure": "outdoor_seating",
+    "seasonal": "no",
+    "id": "node/13097959975"
+   },
+   "id": "node/13097959975"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.178849,
+     22.304559
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "bin": "yes",
+    "capacity": "10",
+    "heating": "no",
+    "leisure": "outdoor_seating",
+    "lit": "yes",
+    "seasonal": "no",
+    "id": "node/13097959978"
+   },
+   "id": "node/13097959978"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.17889,
+     22.304708
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "bin": "yes",
+    "capacity": "10",
+    "heating": "no",
+    "leisure": "outdoor_seating",
+    "lit": "yes",
+    "seasonal": "no",
+    "id": "node/13097959979"
+   },
+   "id": "node/13097959979"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179132,
+     22.305121
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "door": "hinged",
+    "entrance": "secondary",
+    "id": "node/13097959986"
+   },
+   "id": "node/13097959986"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179405,
+     22.304839
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "access": "permissive",
+    "entrance": "emergency",
+    "wheelchair": "limited",
+    "id": "node/13097959989"
+   },
+   "id": "node/13097959989"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179265,
+     22.304964
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "access": "yes",
+    "door": "automatic",
+    "entrance": "secondary",
+    "id": "node/13097959994"
+   },
+   "id": "node/13097959994"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179008,
+     22.305299
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "fitness_station": "horizontal_bar",
+    "leisure": "fitness_station",
+    "sport": "fitness",
+    "id": "node/13097959999"
+   },
+   "id": "node/13097959999"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179026,
+     22.305295
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "fitness_station": "parallel_bars",
+    "leisure": "fitness_station",
+    "sport": "fitness",
+    "id": "node/13097960000"
+   },
+   "id": "node/13097960000"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179043,
+     22.305318
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "fitness_station": "sit-up",
+    "leisure": "fitness_station",
+    "sport": "fitness",
+    "id": "node/13097960001"
+   },
+   "id": "node/13097960001"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.17892,
+     22.305208
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "club": "yes",
+    "name": "Living Lab",
+    "id": "node/13097960015"
+   },
+   "id": "node/13097960015"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.178992,
+     22.305423
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "access": "private",
+    "door": "hinged",
+    "entrance": "service",
+    "wheelchair": "no",
+    "id": "node/13097960044",
+    "parent": "Jockey Club Innovation Tower"
+   },
+   "id": "node/13097960044"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179901,
+     22.305693
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "access": "private",
+    "door": "hinged",
+    "entrance": "emergency",
+    "wheelchair": "limited",
+    "id": "node/13097960045",
+    "parent": "Block X"
+   },
+   "id": "node/13097960045"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179371,
+     22.30554
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "heating": "no",
+    "leisure": "outdoor_seating",
+    "lit": "yes",
+    "seasonal": "no",
+    "id": "node/13097960054"
+   },
+   "id": "node/13097960054"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.17919,
+     22.304747
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "capacity": "10",
+    "heating": "no",
+    "leisure": "outdoor_seating",
+    "lit": "yes",
+    "seasonal": "no",
+    "id": "node/13097960055"
+   },
+   "id": "node/13097960055"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179438,
+     22.305209
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "highway": "elevator",
+    "id": "node/13097960058"
+   },
+   "id": "node/13097960058"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179394,
+     22.305377
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "highway": "elevator",
+    "id": "node/13097960060"
+   },
+   "id": "node/13097960060"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.178383,
+     22.304065
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "access": "private",
+    "entrance": "emergency",
+    "wheelchair": "limited",
+    "id": "node/13097960087",
+    "parent": "Shaw Sports Complex"
+   },
+   "id": "node/13097960087"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.17907,
+     22.304659
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "name": "Food and Snacks",
+    "shop": "kiosk",
+    "id": "node/13097960101"
+   },
+   "id": "node/13097960101"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179254,
+     22.30441
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "entrance": "main",
+    "id": "node/13097960102",
+    "name": "East Entrance (Shaw Amenities Building)",
+    "name:en": "East Entrance (Shaw Amenities Building)"
+   },
+   "id": "node/13097960102"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179021,
+     22.30449
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "access": "yes",
+    "door": "hinged",
+    "entrance": "main",
+    "level": "-2",
+    "wheelchair": "yes",
+    "id": "node/13097960122",
+    "name": "West Entrance (Shaw Amenities Building)",
+    "name:en": "West Entrance (Shaw Amenities Building)"
+   },
+   "id": "node/13097960122"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179026,
+     22.304509
+    ]
+   },
+   "properties": {
+    "timestamp": "2026-03-24T10:24:16Z",
+    "version": "3",
+    "changeset": "180345903",
+    "user": "Dundee930",
+    "uid": "20964582",
+    "alt_name": "舊Can",
+    "alt_name:zh": "舊Can",
+    "amenity": "restaurant",
+    "name": "VA Student Canteen",
+    "operator": "泛亞飲食 Asia Pacific Catering",
+    "id": "node/13097960123"
+   },
+   "id": "node/13097960123"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179017,
+     22.304443
+    ]
+   },
+   "properties": {
+    "timestamp": "2026-03-24T10:01:29Z",
+    "version": "2",
+    "changeset": "180344607",
+    "user": "Dundee930",
+    "uid": "20964582",
+    "name": "Gourmet Shop",
+    "name:en": "Gourmet Shop",
+    "operator": "唯港薈 Hotel ICON",
+    "shop": "bakery",
+    "id": "node/13097960126"
+   },
+   "id": "node/13097960126"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.178885,
+     22.30352
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "capacity": "50",
+    "heating": "no",
+    "leisure": "outdoor_seating",
+    "lit": "yes",
+    "seasonal": "no",
+    "id": "node/13097960127"
+   },
+   "id": "node/13097960127"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179713,
+     22.304036
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "highway": "elevator",
+    "id": "node/13097960130"
+   },
+   "id": "node/13097960130"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.17956,
+     22.304197
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "entrance": "yes",
+    "id": "node/13097960132"
+   },
+   "id": "node/13097960132"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179392,
+     22.3038
+    ]
+   },
+   "properties": {
+    "timestamp": "2026-03-25T11:56:04Z",
+    "version": "3",
+    "changeset": "180403922",
+    "user": "Dundee930",
+    "uid": "20964582",
+    "amenity": "clock",
+    "display": "analog",
+    "name": "大笨鐘 Big Ben",
+    "name:en": "Big Ben",
+    "name:zh": "大笨鐘",
+    "support": "pole",
+    "id": "node/13097960137"
+   },
+   "id": "node/13097960137"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179585,
+     22.305421
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "entrance": "yes",
+    "id": "node/13097960143"
+   },
+   "id": "node/13097960143"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179514,
+     22.303895
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-08-26T09:19:03Z",
+    "version": "1",
+    "changeset": "171017579",
+    "user": "OctoberFifteenth",
+    "uid": "15330740",
+    "entrance": "yes",
+    "id": "node/13097960157"
+   },
+   "id": "node/13097960157"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.177662,
+     22.302931
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-11-03T15:49:21Z",
+    "version": "1",
+    "changeset": "174154166",
+    "user": "vectorial8192",
+    "uid": "10815817",
+    "barrier": "yes",
+    "id": "node/13277885334"
+   },
+   "id": "node/13277885334"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.178564,
+     22.303132
+    ]
+   },
+   "properties": {
+    "timestamp": "2025-11-04T08:30:57Z",
+    "version": "1",
+    "changeset": "174180594",
+    "user": "vectorial8192",
+    "uid": "10815817",
+    "access": "yes",
+    "amenity": "theatre",
+    "name": "蔣震劇院 Chiang Chen Studio Theatre",
+    "name:en": "Chiang Chen Studio Theatre",
+    "name:zh": "蔣震劇院",
+    "university": "yes",
+    "id": "node/13279290768"
+   },
+   "id": "node/13279290768"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179401,
+     22.307145
+    ]
+   },
+   "properties": {
+    "timestamp": "2026-04-23T12:57:47Z",
+    "version": "6",
+    "changeset": "181717355",
+    "user": "Dundee930",
+    "uid": "20964582",
+    "addr:suburb": "何文田 Ho Man Tin",
+    "addr:suburb:en": "Ho Man Tin",
+    "addr:suburb:zh": "何文田",
+    "brand": "港鐵 MTR",
+    "brand:en": "MTR",
+    "brand:zh": "港鐵",
+    "depot": "subway",
+    "depot:service": "repair;maintenance;stabling;storage",
+    "landuse": "railway",
+    "name": "港鐵綜合輪對維修中心 MTR Integrated Wheelset Maintenance Centre",
+    "name:en": "MTR Integrated Wheelset Maintenance Centre",
+    "name:zh": "港鐵綜合輪對維修中心",
+    "network": "港鐵 MTR",
+    "network:en": "MTR",
+    "network:zh": "港鐵",
+    "operator": "香港鐵路有限公司 MTR Corporation Limited",
+    "operator:en": "MTR Corporation Limited",
+    "operator:wikidata": "Q1479375",
+    "operator:zh": "香港鐵路有限公司",
+    "owner": "香港鐵路有限公司 MTR Corporation Limited",
+    "owner:en": "MTR Corporation Limited",
+    "owner:wikidata": "Q1479375",
+    "owner:zh": "香港鐵路有限公司",
+    "railway": "service_station",
+    "subway": "yes",
+    "id": "node/13672953576"
+   },
+   "id": "node/13672953576"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179287,
+     22.302675
+    ]
+   },
+   "properties": {
+    "timestamp": "2026-03-24T10:01:29Z",
+    "version": "1",
+    "changeset": "180344607",
+    "user": "Dundee930",
+    "uid": "20964582",
+    "amenity": "restaurant",
+    "cuisine": "asian",
+    "name": "花園理 U Garden",
+    "name:en": "U Garden",
+    "name:zh": "花園理",
+    "id": "node/13673983532"
+   },
+   "id": "node/13673983532"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.179937,
+     22.304952
+    ]
+   },
+   "properties": {
+    "timestamp": "2026-03-24T10:24:16Z",
+    "version": "2",
+    "changeset": "180345903",
+    "user": "Dundee930",
+    "uid": "20964582",
+    "alt_name": "新Can",
+    "alt_name:zh": "新Can",
+    "amenity": "restaurant",
+    "cuisine": "asian",
+    "name": "學生膳堂 Communal Student Canteen",
+    "name:en": "Communal Student Canteen",
+    "name:zh": "學生膳堂",
+    "operator": "泛亞飲食 Asia Pacific Catering",
+    "id": "node/13673983533"
+   },
+   "id": "node/13673983533"
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.180023,
+     22.304969
+    ]
+   },
+   "properties": {
+    "timestamp": "2026-03-24T10:01:29Z",
+    "version": "1",
+    "changeset": "180344607",
+    "user": "Dundee930",
+    "uid": "20964582",
+    "amenity": "restaurant",
+    "cuisine": "chinese",
+    "name": "聚賢樓海鮮酒家 Ju Yin House Seafood Restaurant",
+    "name:en": "Ju Yin House Seafood Restaurant",
+    "name:zh": "聚賢樓海鮮酒家",
+    "id": "node/13673983534"
+   },
+   "id": "node/13673983534"
+  }
+ ]
+}

@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#a63547" />
+<title>PolyU Campus Navigator - COMP4431 Group 21</title>
+<link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">◈</span>
+    <div>
+      <h1>PolyU Campus Navigator</h1>
+      <p class="sub">COMP4431 Artificial Intelligence &middot; Group 21</p>
+    </div>
+  </div>
+  <div class="status" id="status">
+    <span class="pill" id="pill-mode">connecting…</span>
+
+    <!-- (i) hover/focus card: where the data comes from. -->
+    <div class="tip-wrap">
+      <button class="round-btn" id="info-btn" type="button"
+              aria-describedby="info-pop" aria-label="Where does this data come from?">i</button>
+      <div class="tip-card" id="info-pop" role="tooltip">
+        <h3>Where this data comes from</h3>
+        <p>Scraped once from two official PolyU websites. </p>
+        <ul>
+          <li><b>Campus Map</b> &mdash; 561 POIs with waypoints and trilingual names<br>
+              <span class="src">polyu.edu.hk/campus-map</span></li>
+          <li><b>GreenMap@PolyU</b> &mdash; 315 recycling, water and green facilities<br>
+              <span class="src">polyu.edu.hk/greenmap</span></li>
+        </ul>
+        <p class="tip-foot">Walkway links are <b>hand-authored</b> on top of published coordinates 
+          and may contain errors. Stairs and lifsts are not modelled. Opening hours are quoted only 
+          where PolyU publishes them.</p>
+        <p class="tip-foot" id="info-counts"></p>
+      </div>
+    </div>
+
+    <button class="round-btn" id="settings-btn" type="button"
+            aria-label="Model settings" title="Model settings (API key)">&#9881;</button>
+  </div>
+</header>
+
+<!-- settings dialog: writes .env -->
+<div class="modal" id="settings-modal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <header>
+      <h2 id="settings-title">Model settings</h2>
+      <button id="settings-close" class="ghost" type="button" aria-label="Close">&#10005;</button>
+    </header>
+    <p class="modal-note">
+      Saved to <code>.env</code> in the project folder.
+    </p>
+    <label class="field">
+      <span>OpenRouter API key</span>
+      <input id="settings-key" type="password" autocomplete="off" spellcheck="false"
+             placeholder="sk-or-v1-… (leave blank to keep the current one)">
+    </label>
+    <label class="field">
+      <span>Model id</span>
+      <input id="settings-model" type="text" autocomplete="off" spellcheck="false"
+             placeholder="google/gemma-4-26b-a4b-it:free">
+    </label>
+    <p class="modal-status" id="settings-status"></p>
+    <footer>
+      <button id="settings-save" type="button">Save to .env</button>
+      <button id="settings-cancel" class="ghost" type="button">Cancel</button>
+    </footer>
+  </div>
+</div>
+
+<main class="layout">
+  <!-- --------------------------------------------------------------- chat -->
+  <section class="panel chat-panel">
+    <div class="panel-head">
+      <h2>Chat</h2>
+      <button id="reset" class="ghost">Reset</button>
+    </div>
+    <div class="chat" id="chat"></div>
+
+    <!-- The avatar lives with the conversation, not in a column of its own.
+         It sits directly above the composer so the face that is "speaking" is
+         where your eyes already are, and the whole 280 px column comes back. -->
+    <div class="avatar-dock" id="avatar-dock">
+      <!-- A robot bust, drawn once, animated entirely by CSS (see styles.css).
+           Five state classes -- idle / listening / thinking / speaking / error --
+           are the only thing JavaScript ever changes on it. -->
+      <svg id="avatar" viewBox="0 0 200 200" class="avatar idle" role="img"
+           aria-label="Assistant robot face">
+        <defs>
+          <radialGradient id="avatar-halo" cx="46%" cy="38%" r="62%">
+            <stop offset="0%" class="halo-in"/>
+            <stop offset="100%" class="halo-out"/>
+          </radialGradient>
+          <linearGradient id="avatar-shell" x1="22%" y1="0%" x2="78%" y2="100%">
+            <stop offset="0%" class="shell-hi"/>
+            <stop offset="100%" class="shell-lo"/>
+          </linearGradient>
+          <linearGradient id="avatar-torso" x1="24%" y1="0%" x2="76%" y2="100%">
+            <stop offset="0%" class="torso-hi"/>
+            <stop offset="100%" class="torso-lo"/>
+          </linearGradient>
+          <filter id="avatar-eyeglow" x="-80%" y="-80%" width="260%" height="260%">
+            <feDropShadow class="eglow" dx="0" dy="0" stdDeviation="3.2"/>
+          </filter>
+        </defs>
+
+        <circle cx="100" cy="92" r="86" fill="url(#avatar-halo)"/>
+
+        <!-- sweater: a cropped bust, with raglan seams running from the neckline
+             out to the shoulder joints -->
+        <path class="torso" d="M34 180 C34 124 50 137 72 143 L128 143 C150 137 166 124 166 180 Z"/>
+        <path class="collar" d="M78 146 Q66 155 54 169.64"/>
+        <path class="collar" d="M122 146 Q134 155 146 169.64"/>
+        <circle class="joint" cx="40" cy="162.61" r="13"/>
+        <circle class="joint" cx="160" cy="162.61" r="13"/>
+        <circle class="jointin" cx="40" cy="162.61" r="4.55"/>
+        <circle class="jointin" cx="160" cy="162.61" r="4.55"/>
+        <rect class="badge" x="84" y="155.61" width="32" height="14" rx="4"/>
+        <rect class="badge-l" x="90" y="159.61" width="20" height="2.4" rx="1.2"/>
+        <rect class="badge-l" x="90" y="164.61" width="13" height="2.4" rx="1.2"/>
+
+        <!-- neck: red collar flange, dark column, one rib. The head is drawn
+             afterwards so it caps the top of the column. -->
+        <rect class="flange" x="72" y="130" width="56" height="15" rx="7"/>
+        <rect class="neck" x="86" y="112" width="28" height="24" rx="6"/>
+        <rect class="rib" x="90" y="124.6" width="20" height="3" rx="1.5"/>
+
+        <!-- antenna: slow pulse is the idle heartbeat -->
+        <rect class="stem" x="98.5" y="12" width="3" height="16" rx="1.5"/>
+        <circle class="bulb" cx="100" cy="9" r="6.5"/>
+        <circle class="bulb-hl" cx="98" cy="6.5" r="2"/>
+
+        <!-- side pods -->
+        <circle class="pod" cx="31" cy="80" r="10.5"/>
+        <circle class="pod" cx="169" cy="80" r="10.5"/>
+        <circle class="pod-in" cx="31" cy="80" r="3.6"/>
+        <circle class="pod-in" cx="169" cy="80" r="3.6"/>
+
+        <!-- head -->
+        <rect class="skull" x="40" y="26" width="120" height="92" rx="26"/>
+        <rect class="visor" x="49" y="38" width="102" height="68" rx="16"/>
+
+        <g class="eyes">
+          <circle class="eye" cx="80" cy="63" r="7"/>
+          <circle class="eye" cx="120" cy="63" r="7"/>
+        </g>
+
+        <!-- idle / listening: a small smile -->
+        <path class="smile" d="M85 81 Q100 96 115 81"/>
+
+        <!-- error: X eyes and a frown -->
+        <path class="frown" d="M85 89 Q100 74 115 89"/>
+        <path class="xarms" d="M71.5 54.5 L88.5 71.5 M88.5 54.5 L71.5 71.5
+                              M111.5 54.5 L128.5 71.5 M128.5 54.5 L111.5 71.5"/>
+
+        <!-- listening: an ear with two sound waves -->
+        <g class="earicon" transform="translate(61.6 53.6) scale(1.7)">
+          <path d="M6 8.5a6.5 6.5 0 1 1 13 0c0 6-6 6-6 10a3.5 3.5 0 1 1-7 0"/>
+          <path d="M15 8.5a2.5 2.5 0 0 0-5 0v1a2 2 0 1 1 0 4"/>
+        </g>
+        <path class="waves2 w1" d="M106 63 Q117 74 106 85"/>
+        <path class="waves2 w2" d="M114 56 Q130 74 114 92"/>
+
+        <!-- thinking: three dots, and no eyes -->
+        <g class="dots">
+          <circle cx="84" cy="69" r="4.5"/>
+          <circle cx="100" cy="69" r="4.5"/>
+          <circle cx="116" cy="69" r="4.5"/>
+        </g>
+
+        <!-- speaking: three dots at mouth height -->
+        <g class="tdots">
+          <circle cx="84" cy="85" r="6.5"/>
+          <circle cx="100" cy="85" r="6.5"/>
+          <circle cx="116" cy="85" r="6.5"/>
+        </g>
+      </svg>
+
+      <div class="avatar-meta">
+        <div class="avatar-state" id="avatar-state">idle</div>
+        <div class="voice-row">
+          <button id="mic" class="icon-btn" title="Speak to the assistant (speech to text)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4"/></svg>
+            <span>Speak</span>
+          </button>
+          <button id="speaker" class="icon-btn on" title="Read replies aloud (text to speech)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16 9a4 4 0 0 1 0 6"/></svg>
+            <span>Voice</span>
+          </button>
+          <label class="select-wrap" title="Recognition language">
+            <select id="lang">
+              <option value="en-US">English</option>
+              <option value="zh-HK">廣東話</option>
+              <option value="zh-CN">普通话</option>
+            </select>
+          </label>
+        </div>
+        <p class="hint" id="voice-hint"></p>
+      </div>
+    </div>
+
+    <form class="composer" id="composer">
+      <input id="input" type="text" autocomplete="off"
+             placeholder="Ask about a route, a facility, or opening hours…" />
+      <button type="submit" id="send">Send</button>
+    </form>
+  </section>
+
+  <!-- ---------------------------------------------------------------- map -->
+  <section class="panel map-panel">
+    <div class="panel-head">
+      <h2>Campus map</h2>
+      <span class="map-hint">click a place to route to it · scroll to zoom</span>
+    </div>
+    <div class="map-wrap">
+      <svg id="map" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid meet" role="img"
+           aria-label="Map of the PolyU campus showing walkable links and the planned route">
+        <g id="layer-tiles"></g>
+        <g id="layer-footprints"></g>
+        <g id="layer-edges"></g>
+        <g id="layer-nodes"></g>
+        <g id="layer-route"></g>
+        <g id="layer-facilities"></g>
+      </svg>
+
+      <!-- search, the way every map app does it -->
+      <div class="map-search">
+        <input id="place-search" type="search" autocomplete="off" spellcheck="false"
+               placeholder="Search a place &mdash; library, Core D, AED&hellip;"
+               aria-label="Search for a place on campus" />
+        <div class="search-results" id="search-results" hidden></div>
+      </div>
+
+      <!-- appears only when a route is drawn, so the map never advertises
+           something that is not on screen -->
+      <div class="route-badge" id="route-badge" hidden></div>
+
+      <!-- the legend lives in the bottom-left corner and is always on. Its width is
+           max-content, so it grows and shrinks with the number of toggles instead of
+           reserving a fixed box. -->
+      <div class="map-legend" id="legend">
+        <div class="legend-row">
+          <button class="legend-chip" id="links-toggle" type="button"><i class="sw-line"></i>walkway links</button>
+          <button class="legend-chip" id="doors-toggle" type="button"><i class="sw-door"></i>doorways</button>
+        </div>
+        <div class="legend-cats" id="legend-cats">
+          <button class="legend-chip" data-cat="recycle" type="button"><i></i>recycling</button>
+          <button class="legend-chip" data-cat="water" type="button"><i></i>water</button>
+          <button class="legend-chip" data-cat="toilet" type="button"><i></i>toilet</button>
+          <button class="legend-chip" data-cat="aed" type="button"><i></i>AED</button>
+          <button class="legend-chip" data-cat="food" type="button"><i></i>canteen</button>
+          <button class="legend-chip" data-cat="service" type="button"><i></i>clinic · other</button>
+        </div>
+        <div class="legend-actions">
+          <button id="layers-all" type="button">Show all</button>
+          <button id="layers-none" type="button">Hide all</button>
+        </div>
+
+      </div>
+
+      <div class="map-north" aria-hidden="true">N<span>▲</span></div>
+      <div class="map-scale" id="map-scale"><b></b><span></span></div>
+
+      <div class="map-tools">
+        <button id="zoom-in" title="Zoom in">+</button>
+        <button id="zoom-out" title="Zoom out">−</button>
+        <button id="zoom-fit" title="Fit the whole campus">⤢</button>
+        <button id="basemap-btn" class="active" title="Basemap: street map or plain diagram">▣</button>
+
+      </div>
+      <div class="map-tip" id="map-tip"></div>
+      <footer class="attrib">
+        Basemap &copy; OpenStreetMap contributors &middot;
+        Places: PolyU Campus Map &amp; GreenMap@PolyU
+      </footer>
+    </div>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

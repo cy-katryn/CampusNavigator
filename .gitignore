@@ -1,0 +1,39 @@
+# --- secrets -------------------------------------------------------------
+.env
+*.key
+secrets.json
+
+# --- python --------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+pytest-cache-files-*/
+
+# --- runtime artefacts ---------------------------------------------------
+logs/
+*.log
+cache/
+llm_cache.json
+
+# --- os / editor ---------------------------------------------------------
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# scratch: editor/session temp files and hand-made backups
+.tmp_*
+*.bak
+*.orig
+
+# a stray hand copy of the generated POI file; delete the file or this line
+data/authored/campus_pois1.geojson
+
+# test scratch output
+tests/_tmp/
+
+# archived out-of-scope work
+_archive_hk_wide/
