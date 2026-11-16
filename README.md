@@ -18,6 +18,12 @@ python -m campus_nav.cli --demo      # the same three turns in a terminal
 Python 3.10+ to run it — the standard library only, nothing to install, no network.
 The interface ships as a committed bundle, so no build step is needed to demo it.
 
+The graph is read from `data/processed_data/campus_graph.json` **once, at startup**: after
+`python tools/build.py graph` you must restart the server, or the browser keeps being served
+the graph the old process is holding in memory. (A graph built before the `category` field
+existed looks like a broken legend — every chip matches nothing, and every place falls into
+"main locations".)
+
 To change the interface (Node 18+), the source lives in `web/` and builds into
 `campus_nav/static/`:
 
@@ -50,11 +56,15 @@ a fact that was not computed.
 ## What it does
 
 **Map** — extruded building blocks in PolyU red with grey roofs, paved squares and lawns
-painted flat, doorways, facility pins, and the walkway network. Pins, letters and line
-weights are drawn in map units, so they grow with the map as you zoom in, exactly as the
-buildings do. Routes appear only while you are navigating: up to three ways there, each in
-its own colour, with the chosen one drawn solid over the others. The legend in the
-bottom-left corner switches each layer on.
+painted flat, plus the place markers and facility pins that the walkways connect. Pins,
+letters and line weights are drawn in map units, so they grow with the map as you zoom in,
+exactly as the buildings do. Routes appear only while you are navigating: up to three ways
+there, each in its own colour, with the chosen one drawn solid over the others. The legend
+in the bottom-left corner switches each layer on, grouped the way the campus map publishes
+its places: **Places** (blocks & buildings, main locations, and the walkway links
+themselves), **Amenities** (public transport, lecture theatres, AEDs, water stations,
+toilets, catering, the clinic, lactation and prayer rooms) and **Offices** (faculties &
+schools, administrative offices).
 
 **Chat** — asks in plain language for a route between two places, re-plans when you report a
 link closed, lists the nearest facility of a kind, quotes opening hours from the published

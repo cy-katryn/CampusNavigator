@@ -187,16 +187,6 @@ def place_from_feature(feature: dict) -> dict:
         name = service or ENTRANCE_LABELS.get(entrance, "Entrance") if kind == "entrance" \
             else (service or "Unnamed place")
 
-    # A place has exactly two names: the English one and the Chinese one. There is no
-    # third list of invented search words -- a node answers to its name, its Chinese
-    # name and its id, and that is what the dialogue matches against.
-    # The authored files carry the two scripts separately: name:zh-Hant and
-    # name:zh-Hans. The graph keeps the traditional one, which is the form the place
-    # is known by on campus and the base the simplified form is derived from.
-    # name:zh is gone: the authored files carry the two scripts separately, and so
-    # does the graph. name_zh is what the place is called on campus; name_zh_cn is the
-    # same name in simplified characters, taken from the file rather than converted at
-    # run time from a table that had to be maintained by hand.
     name_zh = str(props.get("name:zh-Hant") or props.get("name:zh") or "").strip()
     name_zh_cn = str(props.get("name:zh-Hans") or "").strip()
 
@@ -415,28 +405,15 @@ def build_graph(node_features: list[dict], path_features: list[dict],
         if not keep_decor and is_decor(props):
             decor.append(f"{props.get('id')}  [{describe_tags(props)}]")
             continue
-        # "routable": "no" works on points too: the place stays on the map but is not a
-        # destination, which is how a doorway or a decorative marker is kept out.
         if str(props.get("routable") or "").strip().lower() in {"no", "false", "0", "n"}:
             silent.append(f"{props.get('id')}  [{describe_tags(props)}]")
             continue
         place = place_from_feature(feature)
-        # The authored file names the building a place stands in. That name is kept
-        # for the map and the reply, but never as a graph link: a structure is a
-        # picture, not a node, so there is nothing for it to point at. The graph
-        # field is cleared so nothing tries to resolve a name as an id.
         if not place.get("building") and place.get("parent"):
             place["building"] = place["parent"]
         place.pop("parent", None)
         places.append(place)
 
-    # Every place names the building it stands in, and a reply in Chinese has to say
-    # that name. Resolving it here is what lets the app stop opening the published
-    # scrape at start-up for a translation it could have been given.
-    #
-    # "Block V (Jockey Club Innovation Tower)" is also known as each of its two halves,
-    # and the campus map uses both forms. Both are indexed, from the name the place
-    # already carries, so no second look-up table has to exist anywhere.
     building_names = building_name_index(places)
 
     if decor:
@@ -520,10 +497,6 @@ def build_graph(node_features: list[dict], path_features: list[dict],
     unjoined: list[str] = []
     indoor: list[dict] = []
     for place in places:
-        # A facility inside a building is not a point on the pavement: you reach it by
-        # walking to the building and going in. Giving it its own hop would draw a
-        # straight line through a wall and invent a distance nobody has surveyed.
-        # Doorways are exempt -- a doorway IS the threshold you walk up to.
         if place.get("parent") and place["kind"] in ("facility", "place"):
             indoor.append(place)
             continue
@@ -543,15 +516,6 @@ def build_graph(node_features: list[dict], path_features: list[dict],
                     f"{best_d:.1f} m from the nearest vertex")
             continue
         if best_d > ATTACH_M:
-            # Two very different situations, and they must not be confused. A place a
-            # couple of hundred metres off means the drawing is wrong. A place 1.6 km
-            # off is West Kowloon or the Hung Hom halls: the campus map publishes them,
-            # they are genuinely in the file, and this walkway network does not reach
-            # them. Skip those and say so; refuse to build on the first kind.
-            # The campus map covers several venues by design (SHTM, the halls, West
-            # Kowloon), so one of its records standing off the network is expected and
-            # is simply reported. Any other source standing this far off means the
-            # drawing is wrong, and that still refuses to build.
             if str(place.get("source") or "") == "campus-map" or best_d > OFF_NETWORK_M:
                 off_network.append(f"{place['id']} ({place['name'][:34]}) {best_d:.0f} m")
             else:

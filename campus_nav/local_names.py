@@ -7,8 +7,14 @@ graph is written.
 
 Nothing here reads the published scrape, and nothing here converts one script to the
 other: a conversion table maintained by hand drifts from the source it was copied from,
-and this module used to keep one. See tools/add_zh_names.py for where the simplified
-names come from.
+and this module used to keep one.
+
+The two script names reach the graph through the authored files, not through this
+module. data/authored/campus_pois.geojson and campus_buildings.geojson carry
+name:zh-Hant and name:zh-Hans, copied from the campus map's own bilingual record
+(561 places it publishes in both scripts); tools/build.py copies them onto the node.
+A place the campus map publishes in Latin only -- a shopfront, a brand -- keeps that
+spelling in both columns, which is what the sign says.
 """
 from __future__ import annotations
 

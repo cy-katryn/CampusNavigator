@@ -82,7 +82,6 @@ export class CampusMap {
   private view: View = { x: 0, y: 0, w: 800, h: 600 };
   private basemap = true;
   private showLinks = false;
-  private showDoors = false;
   private hidden = new Set<string>(ALL_LEGEND_KEYS);
   private serviceGroups: { el: SVGGElement; cat: string }[] = [];
   private drag: { x: number; y: number; vx: number; vy: number } | null = null;
@@ -127,11 +126,6 @@ export class CampusMap {
   setShowLinks(on: boolean): void {
     this.showLinks = on;
     this.svg.classList.toggle('no-links', !on);
-  }
-
-  setShowDoors(on: boolean): void {
-    this.showDoors = on;
-    this.drawNodes();
   }
 
   /**
@@ -537,8 +531,8 @@ export class CampusMap {
     this.nodes.forEach((node) => {
       // a waypoint is a junction, not a place: the end point of a link, never drawn
       if (node.kind === 'waypoint') return;
-      // doorways are off until asked for
-      if (node.kind === 'entrance' && !this.showDoors) return;
+      // an entrance, if the data ever carries one, is a place you can walk to like any
+      // other: it is drawn with the rest of the places instead of hiding behind a toggle
       const p = this.project(node.lat, node.lng);
       const g = el('g', { class: 'node ' + node.kind }) as SVGGElement;
       if (node.kind === 'facility') {

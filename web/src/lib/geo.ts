@@ -63,19 +63,14 @@ export const LEGEND: LegendSection[] = [
       { key: 'locations', label: 'main locations' },
     ],
   },
-  {
-    id: 'departments',
-    label: 'Departments',
-    entries: [
-      { key: 'faculties', label: 'faculties & schools' },
-      { key: 'offices', label: 'administrative offices' },
-      { key: 'transport', label: 'public transport' },
-    ],
-  },
+  /* Public transport is open to everyone who walks onto campus, not an office, so it is
+     filed with the amenities. "transport" keeps its own key because it comes from the
+     published category, not from an amenity subtype. */
   {
     id: 'amenities',
     label: 'Amenities',
     entries: [
+      { key: 'transport', label: 'public transport' },
       { key: 'amenity-lecture-theatre', label: 'lecture theatre' },
       { key: 'amenity-aed', label: 'AED' },
       { key: 'amenity-water', label: 'water station' },
@@ -86,6 +81,14 @@ export const LEGEND: LegendSection[] = [
       { key: 'amenity-lactation', label: 'lactation room' },
       { key: 'amenity-prayer', label: 'prayer room' },
       { key: 'amenity-other', label: 'other amenity' },
+    ],
+  },
+  {
+    id: 'offices',
+    label: 'Offices',
+    entries: [
+      { key: 'faculties', label: 'faculties & schools' },
+      { key: 'offices', label: 'administrative offices' },
     ],
   },
 ];

@@ -25,7 +25,6 @@ export function MapPanel(props: MapPanelProps) {
   const svg = useRef<SVGSVGElement>(null);
   const [hidden, setHidden] = useState<Set<string>>(new Set(ALL_LEGEND_KEYS));
   const [showLinks, setShowLinks] = useState(false);
-  const [showDoors, setShowDoors] = useState(false);
   const [basemap, setBasemap] = useState(true);
   const [scale, setScale] = useState<ScaleInfo>({ width: 60, label: '' });
   const [tip, setTip] = useState('');
@@ -68,10 +67,6 @@ export function MapPanel(props: MapPanelProps) {
   useEffect(() => {
     props.mapRef.current?.setShowLinks(showLinks);
   }, [showLinks, props.mapRef]);
-
-  useEffect(() => {
-    props.mapRef.current?.setShowDoors(showDoors);
-  }, [showDoors, props.mapRef]);
 
   useEffect(() => {
     props.mapRef.current?.setBasemap(basemap);
@@ -146,11 +141,9 @@ export function MapPanel(props: MapPanelProps) {
         <LayerLegend
           hidden={hidden}
           showLinks={showLinks}
-          showDoors={showDoors}
           onToggleCategory={toggleCategory}
           onToggleCategoryGroup={toggleGroup}
           onToggleLinks={() => setShowLinks((on) => !on)}
-          onToggleDoors={() => setShowDoors((on) => !on)}
           onShowAll={() => setHidden(new Set())}
           onHideAll={() => setHidden(new Set(ALL_LEGEND_KEYS))}
         />

@@ -10,11 +10,9 @@ const HEAD =
 export interface LayerLegendProps {
   hidden: Set<string>;
   showLinks: boolean;
-  showDoors: boolean;
   onToggleCategory(key: string): void;
   onToggleCategoryGroup(section: string, on: boolean): void;
   onToggleLinks(): void;
-  onToggleDoors(): void;
   onShowAll(): void;
   onHideAll(): void;
 }
@@ -24,8 +22,11 @@ function stateClass(off: boolean): string {
 }
 
 /* The legend sits in the bottom-left corner the way a printed campus map carries its
-   key. Chips are grouped the way the campus map publishes its places: by category,
-   and under Amenities by the amenity itself. */
+   key. Chips are grouped the way the campus map publishes its places: Places, then
+   Amenities (the amenity subtypes, plus the public transport that is open to everyone),
+   then Offices. The walkway network is not a kind of place -- it is the skeleton the
+   routes are measured on -- but it belongs to the same question ("what is on this map?"),
+   so its chip lives with the places. */
 export function LayerLegend(props: LayerLegendProps) {
   const { hidden } = props;
 
@@ -36,32 +37,13 @@ export function LayerLegend(props: LayerLegendProps) {
 
   return (
     <div className="absolute bottom-[30px] left-3 z-[4] flex w-max max-w-[264px] flex-col gap-1.5 rounded-xl border border-line bg-panel-glass px-[11px] py-[9px] text-[11px] text-muted shadow-[0_6px_18px_var(--accent-ring)] backdrop-blur-[6px]">
-      <div className="flex flex-wrap items-center gap-[5px]">
-        <button
-          type="button"
-          onClick={props.onToggleLinks}
-          className={CHIP + stateClass(!props.showLinks)}
-        >
-          <i className="inline-block h-[3px] w-3 rounded-[2px] bg-line" />
-          walkway links
-        </button>
-        <button
-          type="button"
-          onClick={props.onToggleDoors}
-          className={CHIP + stateClass(!props.showDoors)}
-        >
-          <i className="inline-block h-2 w-2 rounded-sm bg-brand" />
-          doorways
-        </button>
-      </div>
-
       {LEGEND.map((section) => (
         <div key={section.id} className="flex max-w-[238px] flex-col gap-1">
           <button
             type="button"
             onClick={() => props.onToggleCategoryGroup(section.id, !anyShown(section.id))}
             className={HEAD + ' w-max cursor-pointer hover:text-ink'}
-            title={'Show or hide every ' + section.label.toLowerCase() + ' chip'}
+            title={'Show or hide every category chip in ' + section.label.toLowerCase()}
           >
             {section.label}
           </button>
@@ -81,6 +63,18 @@ export function LayerLegend(props: LayerLegendProps) {
                 {entry.label}
               </button>
             ))}
+            {section.id === 'places' ? (
+              <button
+                type="button"
+                data-cat="links"
+                onClick={props.onToggleLinks}
+                className={CHIP + stateClass(!props.showLinks)}
+                title="The walkway network the walking routes are measured on"
+              >
+                <i className="inline-block h-[3px] w-3 rounded-[2px] bg-line" />
+                walkway links
+              </button>
+            ) : null}
           </div>
         </div>
       ))}
