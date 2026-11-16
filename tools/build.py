@@ -30,6 +30,7 @@ from campus_nav.places import (  # noqa: E402
     CAMPUS_SERVICES,
     GREEN_ACCEPTS,
     feature_height,
+    label_key,
     shape_kind,
 )
 
@@ -184,12 +185,21 @@ def place_from_feature(feature: dict) -> dict:
     # A place has exactly two names: the English one and the Chinese one. There is no
     # third list of invented search words -- a node answers to its name, its Chinese
     # name and its id, and that is what the dialogue matches against.
-    name_zh = str(props.get("name:zh") or "").strip()
+    # The authored files carry the two scripts separately: name:zh-Hant and
+    # name:zh-Hans. The graph keeps the traditional one, which is the form the place
+    # is known by on campus and the base the simplified form is derived from.
+    # name:zh is gone: the authored files carry the two scripts separately, and so
+    # does the graph. name_zh is what the place is called on campus; name_zh_cn is the
+    # same name in simplified characters, taken from the file rather than converted at
+    # run time from a table that had to be maintained by hand.
+    name_zh = str(props.get("name:zh-Hant") or props.get("name:zh") or "").strip()
+    name_zh_cn = str(props.get("name:zh-Hans") or "").strip()
 
     return {
         "id": str(props.get("id") or f"N{lat},{lng}"),
         "name": name,
         "name_zh": name_zh,
+        "name_zh_cn": name_zh_cn,
         "lat": lat,
         "lng": lng,
         "kind": kind,
@@ -342,6 +352,42 @@ def vertex_key(lat: float, lng: float) -> tuple[float, float]:
     return (round(lat, 6), round(lng, 6))
 
 
+PARENS = re.compile(r"^(.*?)\s*[(（]([^()（）]+)[)）]$")
+
+
+def building_name_index(places: list[dict]) -> dict[str, list[str]]:
+    """Building label -> its two script forms, for the labels a place stands in.
+
+    A place names the building it stands in ("Block Y (Lee Shau Kee Building)"), and a
+    Chinese reply has to say that name. The graph itself can answer most of that from
+    the place names it already holds; this index exists only for the labels whose place
+    is not in the graph at all -- a bus station or a wing the campus map lists but does
+    not route to. Keeping it to the labels actually used keeps it small.
+    """
+    by_name: dict[str, list[str]] = {}
+    for place in places:
+        name = place.get("name") or ""
+        pair = [place.get("name_zh") or "", place.get("name_zh_cn") or ""]
+        if not name or not any(pair):
+            continue
+        by_name.setdefault(label_key(name), pair)
+        qualified = PARENS.fullmatch(name)
+        if not qualified:
+            continue
+        chinese = PARENS.fullmatch(pair[0]) if pair[0] else None
+        chinese_cn = PARENS.fullmatch(pair[1]) if pair[1] else None
+        for group in (1, 2):
+            part = qualified[group].strip()
+            if part:
+                by_name.setdefault(label_key(part), [
+                    (chinese[group].strip() if chinese else ""),
+                    (chinese_cn[group].strip() if chinese_cn else ""),
+                ])
+
+    wanted = {label_key(place.get("building") or "") for place in places if place.get("building")}
+    return {key: by_name[key] for key in sorted(wanted) if key in by_name}
+
+
 def build_graph(node_features: list[dict], path_features: list[dict],
                 repair_m: float = REPAIR_M, keep_decor: bool = False,
                 strict: bool = False) -> dict:
@@ -377,6 +423,15 @@ def build_graph(node_features: list[dict], path_features: list[dict],
             place["building"] = place["parent"]
         place.pop("parent", None)
         places.append(place)
+
+    # Every place names the building it stands in, and a reply in Chinese has to say
+    # that name. Resolving it here is what lets the app stop opening the published
+    # scrape at start-up for a translation it could have been given.
+    #
+    # "Block V (Jockey Club Innovation Tower)" is also known as each of its two halves,
+    # and the campus map uses both forms. Both are indexed, from the name the place
+    # already carries, so no second look-up table has to exist anywhere.
+    building_names = building_name_index(places)
 
     if decor:
         print(f"  {len(decor)} point(s) are furniture, not destinations: kept in the "
@@ -620,6 +675,9 @@ def build_graph(node_features: list[dict], path_features: list[dict],
                 f"{len(indoor)} place(s) stand inside a building and are reached "
                 f"through it, on the floor the source publishes",
             ],
+            # The display names of the buildings places stand in, both scripts. Derived
+            # here from the place names, so the app renders them without a scrape.
+            "building_names": building_names,
             "counts": {
                 "nodes": len(nodes),
                 "waypoints": len(endpoints),

@@ -117,6 +117,17 @@ SERVICE_WORDS: tuple[str, ...] = (
 )
 
 
+def label_key(text: str) -> str:
+    """The form two name lists are joined on: case, spacing and dotted initials folded.
+
+    The builder resolves a building label against the place names in the authored file,
+    and the display layer resolves the same label again when it renders a card. Both
+    call this, because a join key that differs by one space fails silently -- the same
+    way the UniRe key in this module's docstring once did.
+    """
+    return " ".join((text or "").casefold().replace(".", " ").split())
+
+
 def canonical_category(raw: str) -> str:
     """Map everyday item wording to a canonical category, tolerating plurals.
 

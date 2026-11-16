@@ -1,12 +1,21 @@
-"""Offline display names for the English, Cantonese and Mandarin campus guides."""
+"""Display names for the English, Cantonese and Mandarin campus guides.
+
+Every name this module renders is already in the graph. campus_graph.json carries the
+place name in both scripts (name_zh, name_zh_cn) and the building label each place
+stands in, also in both scripts, because tools/build.py resolves them once when the
+graph is written.
+
+Nothing here reads the published scrape, and nothing here converts one script to the
+other: a conversion table maintained by hand drifts from the source it was copied from,
+and this module used to keep one. See tools/add_zh_names.py for where the simplified
+names come from.
+"""
 from __future__ import annotations
 
-import json
 import re
-from functools import lru_cache
 
-from .config import AUTHORED_DIR, NODES_FILE, RAW_DIR
 from .graph import CampusGraph
+from .places import label_key as _key
 
 
 # These generic labels come from the graph builder. Proper names come from the
@@ -29,60 +38,16 @@ _LABELS = {
     "Canteen": ("飯堂", "食堂"), "Student Canteen": ("學生飯堂", "学生食堂"),
     "Café": ("咖啡店", "咖啡店"), "Kiosk": ("小食亭", "小吃亭"),
 }
-# For OSM features with only a traditional name. Official bilingual records
-# use their own supplied spelling, including differences beyond script.
-_OSM_SIMPLIFIED = str.maketrans(
-    "棟樓圖書館陳麗賽馬會創綜藝鍾體育廳務國銀團聯學醫療處結診視復劇廚廠華鮑瑩樹潔環黃鄧儷薈偉張講愛繼匯溫傑葉呂鴻屬業門鐵輪對維園賢鮮鐘場廣牆誠剛舊",
-    "栋楼图书馆陈丽赛马会创综艺钟体育厅务国银团联学医疗处结诊视复剧厨厂华鲍莹树洁环黄邓俪荟伟张讲爱继汇温杰叶吕鸿属业门铁轮对维园贤鲜钟场广墙诚刚旧",
-)
 _CHINESE = {"zh-HK": 0, "zh-CN": 1}
 _HAN = re.compile(r"[\u3400-\u9fff]")
 _PARENS = re.compile(r"^(.*?)\s*[(（]([^()（）]+)[)）]$")
 
-
-def _key(label: str) -> str:
-    return " ".join(label.casefold().replace(".", " ").split())
-
-
-@lru_cache(maxsize=1)
-def _campus_names() -> dict[str, tuple[str, str]]:
-    result = {}
-    path = RAW_DIR / "campus_map_pois.json"
-    if not path.is_file():
-        return result
-    records = json.loads(path.read_text(encoding="utf-8"))["records"]
-    for record in records:
-        names = record.get("name") or {}
-        en, hk, cn = (names.get(code, "").strip() for code in ("en_US", "zh_HK", "zh_CN"))
-        if not (en and hk and cn):
-            continue
-        result[_key(en)] = (hk, cn)
-        # The map publishes forms such as "Block V (Jockey Club Innovation Tower)"
-        # with the same structure in both translations. Keep both constituent names.
-        if record["category"] == "Building" and re.match(r"(?:Core|Block|Wing) [A-Z]+\s*\(", en):
-            parts = [_PARENS.fullmatch(value) for value in (en, hk, cn)]
-            if all(parts):
-                for group in (1, 2):
-                    english, cantonese, mandarin = [p[group].strip() for p in parts]
-                    result.setdefault(_key(english), (cantonese, mandarin))
-    # The campus export corrupts the last character of the student hub to 薪 / 荥.
-    # The bilingual building footprint (way/1492140378) identifies it as 學生薈.
-    result[_key("Wong Man and Tang Kit Wah Global Student Hub")] = (
-        "黃民鄧潔華伉儷環球學生薈", "黄民邓洁华伉俪环球学生荟"
-    )
-    return result
-
-
-@lru_cache(maxsize=1)
-def _osm_names() -> dict[str, str]:
-    names = {}
-    for path in (NODES_FILE, AUTHORED_DIR / "campus_buildings.geojson"):
-        if path.is_file():
-            for feature in json.loads(path.read_text(encoding="utf-8"))["features"]:
-                props = feature["properties"]
-                if props.get("name:zh") and props.get("id"):
-                    names[props["id"]] = props["name:zh"]
-    return names
+# Building labels the campus map lists but never publishes as a place of their own, so
+# the builder has no place name to copy from. Kept here, small and explicit, rather
+# than inferred from a scraped file at run time.
+_BUILDING_LABELS = {
+    "Wing QT": ("QT翼", "QT翼"),
+}
 
 
 def floor_name(floor: str, lang: str) -> str:
@@ -114,13 +79,37 @@ def building_name(graph: CampusGraph, label: str, lang: str) -> str:
         return label
     idx = _CHINESE[lang]
     label = label.strip()
-    official = _campus_names().get(_key(label))
-    if official:
-        return official[idx]
-    label_key = _key(label)
+    key = _key(label)
+
+    # A place with this exact name is the authoritative answer.
     for node in graph.nodes.values():
-        if node.kind == "building" and _key(node.name) == label_key:
+        if node.name and _key(node.name) == key:
             return place_name(graph, node.id, lang)
+
+    # "Jockey Club Innovation Tower" on its own is the second half of "Block V (Jockey
+    # Club Innovation Tower)", so a bracketed place name answers for either half -- with
+    # that half of its Chinese name, not the whole thing.
+    for node in graph.nodes.values():
+        qualified = _PARENS.fullmatch(node.name or "")
+        if not qualified:
+            continue
+        written = (node.name_zh, node.name_zh_cn)[idx]
+        chinese = _PARENS.fullmatch(written) if written else None
+        if not chinese:
+            continue
+        if _key(qualified[1]) == key:
+            return chinese[1].strip()
+        if _key(qualified[2]) == key:
+            return chinese[2].strip()
+
+    # Otherwise the builder already resolved this label when it wrote the graph, for
+    # the labels whose own place is not in the graph at all, and stored both scripts.
+    resolved = graph.meta.get("building_names", {}).get(key) or []
+    if idx < len(resolved) and resolved[idx]:
+        return resolved[idx]
+    declared = _BUILDING_LABELS.get(label)
+    if declared:
+        return declared[idx]
 
     # GreenMap uses literal addresses such as "Outside Core B" and building
     # codes in brackets. Its graph parent can refer to a different building.
@@ -149,25 +138,23 @@ def place_name(graph: CampusGraph, node_id: str, lang: str) -> str:
     if lang not in _CHINESE:
         return label or node_id
     idx = _CHINESE[lang]
-    official = _campus_names().get(_key(label))
-    if official and _HAN.search(official[idx]):
-        return official[idx]
-    if node.source == "osm":
-        zh = _osm_names().get(node.ref)
-        if zh:
-            return zh if idx == 0 else zh.translate(_OSM_SIMPLIFIED)
-    if node.kind == "building" or node.source == "campus-map":
-        # Graph-only distributions may omit the original map files. These two
-        # node sources include a place-name alias (not an operator or brand).
-        zh = node.name_zh if _HAN.search(node.name_zh) else ""
-        if zh:
-            return zh if idx == 0 else zh.translate(_OSM_SIMPLIFIED)
+
+    # The graph carries the name in both scripts, so the right one is a lookup. A brand
+    # or a shopfront has no Chinese name of its own, and is described from its parts.
+    written = (node.name_zh, node.name_zh_cn)[idx]
+    if written and _HAN.search(written):
+        return written
+
+    # GreenMap names a facility by its literal address ("UniRe recycling · Core H"),
+    # not by a place name, so it is assembled from the parts. No GreenMap point is in
+    # the graph today; this stays because the source is only switched off, not gone.
     if node.source == "greenmap":
         parts = label.split(" · ")
         if len(parts) >= 2 and parts[0] in _LABELS:
             location = building_name(graph, parts[1], lang)
             floor = floor_name(parts[2], lang) if len(parts) > 2 else ""
             return f"{location}{floor}的{_LABELS[parts[0]][idx]}"
+
     qualified = _PARENS.fullmatch(label)
     if qualified and qualified[1] in _LABELS:
         return building_name(graph, qualified[2], lang) + _LABELS[qualified[1]][idx]
@@ -180,7 +167,9 @@ def place_name(graph: CampusGraph, node_id: str, lang: str) -> str:
         return _LABELS[label][idx]
     if node.kind == "waypoint" and not label:
         return ("路徑點", "路径点")[idx]
-    return official[idx] if official else (label or node_id)
+    # The campus map sometimes publishes a Latin name in its Chinese field, and that
+    # spelling is the one on the sign: "U.Green", not "U Green (Staff Club)".
+    return node.name_zh or label or node_id
 
 
 def localize_label(graph: CampusGraph, label: str, lang: str) -> str:

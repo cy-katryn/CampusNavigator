@@ -74,44 +74,67 @@ class SessionState:
     last_facilities: FacilityResult | None = None
 
 
-def fmt_route(graph: CampusGraph, route: RouteResult) -> str:
-    """The route as a person reads it: legs between PLACES.
+def place_legs(graph: CampusGraph, route: RouteResult) -> list[tuple[str, str, float, bool]]:
+    """The route as a person walks it: one leg per pair of PLACES.
 
-    The walkway network contributes junctions, and a junction has no name. Listing
-    fifteen anonymous hops tells the reader nothing, so hops through junctions are
-    folded into the leg that leads to the next real place.
+    The walkway network needs a node at every bend and junction, and a junction has
+    no name -- the graph carries 258 of them. Listing those hops tells a reader
+    nothing, so they are folded into the leg that leads to the next real place.
+
+    Exactly one function decides what a "leg" is, because two places ask the same
+    question: the printed route, and the facts handed to the narrator. When they
+    computed it separately the narrator was told " to : 16 m" once per graph edge
+    while the reader was told "1 leg", so the model wrote prose about a walk made
+    of twenty-nine unnamed hops.
+
+    Returns (from label, to label, metres, uses stairs). The metres of the legs add
+    up to route.total_metres: folding groups the segments, it never drops one.
     """
-    if not route.reachable:
-        return "No route found."
-
     def is_junction(node_id: str) -> bool:
         return graph.node(node_id).kind == "waypoint"
 
     def label(node_id: str) -> str:
         return graph.node(node_id).name or "the walkway"
 
-    places = [node for node in route.path if not is_junction(node)]
-    lines = [f"Route: {' -> '.join(label(node) for node in places)}"]
-
-    last = route.path[0]
+    legs: list[tuple[str, str, float, bool]] = []
+    start = route.path[0] if route.path else ""
     carried = 0.0
+    stairs = False
     for seg in route.segments:
         carried += seg.metres
+        stairs = stairs or seg.stairs
         if is_junction(seg.v):
             continue
-        steps = " (steps)" if seg.stairs else ""
-        lines.append(f"  - {label(last)} -> {label(seg.v)}: {carried:.0f} m{steps}")
-        last = seg.v
-        carried = 0.0
+        legs.append((label(start), label(seg.v), carried, stairs))
+        start, carried, stairs = seg.v, 0.0, False
+    return legs
+
+
+def fmt_route(graph: CampusGraph, route: RouteResult) -> str:
+    """The route as a person reads it: legs between PLACES."""
+    if not route.reachable:
+        return "No route found."
+
+    legs = place_legs(graph, route)
+    stops = [legs[0][0], *(leg[1] for leg in legs)] if legs else [
+        graph.node(node_id).name or "the walkway"
+        for node_id in route.path
+        if graph.node(node_id).kind != "waypoint"
+    ]
+    lines = [f"Route: {' -> '.join(stops)}"]
+    lines.extend(
+        f"  - {start} -> {end}: {metres:.0f} m{' (steps)' if stairs else ''}"
+        for start, end, metres, stairs in legs
+    )
 
     stats = route.stats
     flights = sum(1 for seg in route.segments if seg.stairs)
-    legs = max(len(places) - 1, 1)
+    count = max(len(legs), 1)
     extras = (
         f", {flights} flight{'s' if flights != 1 else ''} of steps" if flights else ""
     )
     lines.append(
-        f"Total: {route.total_metres:.0f} m over {legs} leg{'s' if legs != 1 else ''}{extras}"
+        f"Total: {route.total_metres:.0f} m over {count} leg{'s' if count != 1 else ''}{extras}"
     )
     if stats:
         lines.append(
@@ -663,11 +686,16 @@ class Dialogue:
     # -- narration helpers -------------------------------------------------
     def _facts_from_route(self, route, origin: str, destination: str,
                           constraints: list[str], previous_total: float | None) -> Facts:
-        """Collect exactly what the model may talk about."""
+        """Collect exactly what the model may talk about.
+
+        The legs come from place_legs(), the same function that prints the route:
+        a graph edge between two unnamed junctions is not a leg, and describing one
+        as "to : 16 m" gives the model nothing to write a sentence about.
+        """
+        legs = place_legs(self.graph, route)
         segments = [
-            f"{self.graph.node(s.u).name} to {self.graph.node(s.v).name}: "
-            f"{s.metres:.0f} m"
-            for s in route.segments
+            f"{start} to {end}: {metres:.0f} m{' (steps)' if stairs else ''}"
+            for start, end, metres, stairs in legs
         ]
         options, option_metres = [], []
         if not route.reachable:
@@ -683,7 +711,7 @@ class Dialogue:
             reachable=route.reachable,
             total_metres=route.total_metres if route.reachable else None,
             segment_lines=segments,
-            segment_metres=[s.metres for s in route.segments],
+            segment_metres=[metres for _, _, metres, _ in legs],
             constraints=constraints,
             previous_metres=previous_total,
             blocking=[self._describe_blocking()] if not route.reachable else [],

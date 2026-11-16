@@ -72,7 +72,8 @@ class Node:
     kind: str = "place"          # building | entrance | service | waypoint
     building: str = ""
     floor: str = ""
-    name_zh: str = ""            # the Chinese name, the only other name a node has
+    name_zh: str = ""            # the Chinese name in traditional characters
+    name_zh_cn: str = ""         # the same name in simplified characters
     parent: str = ""             # the building this thing stands inside, if any
     service: str = ""            # e.g. "Rechargeable Battery Collection"
     accepts: tuple[str, ...] = ()  # canonical item categories this point accepts
@@ -129,6 +130,7 @@ class CampusGraph:
                 floor=n.get("floor", ""),
                 parent=n.get("parent", ""),
                 name_zh=str(n.get("name_zh", "")),
+                name_zh_cn=str(n.get("name_zh_cn", "")),
                 service=n.get("service", ""),
                 accepts=tuple(n.get("accepts", ())),
                 source=n.get("source", ""),
