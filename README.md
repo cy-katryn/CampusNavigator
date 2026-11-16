@@ -29,7 +29,7 @@ a fact that was not computed.
 | Student ID | English name | Main responsibility |
 |---|---|---|
 | _to fill in_ | _to fill in_ | _to fill in_ |
-| _to fill in_ | _to fill in_ | _to fill in_ |
+| 23118556d | KWAN Kai Man | _to fill in_ |
 | _to fill in_ | _to fill in_ | _to fill in_ |
 
 ## What it does
