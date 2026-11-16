@@ -1,5 +1,6 @@
 /** Text to speech: one utterance at a time, cancelled before the next one starts. */
-export function pickVoice(lang: string): SpeechSynthesisVoice | null {
+/** Pick the voice closest to the recognition language; private to this module. */
+function pickVoice(lang: string): SpeechSynthesisVoice | null {
   const voices = window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
   const wanted = lang || 'en-US';
   return (

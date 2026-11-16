@@ -33,15 +33,6 @@ export function shortCode(name: string): string {
   return alnum.slice(0, 2).toUpperCase() || '·';
 }
 
-/** Cores A-H, J-N, P-T, U-Z form four readable bands on campus. */
-export function zoneOf(code: string): 1 | 2 | 3 | 4 {
-  const letter = (code || 'A')[0].toUpperCase();
-  if (letter <= 'H') return 1;
-  if (letter <= 'N') return 2;
-  if (letter <= 'T') return 3;
-  return 4;
-}
-
 export type Category = 'recycle' | 'water' | 'toilet' | 'aed' | 'food' | 'service';
 
 export const ALL_CATEGORIES: Category[] = ['recycle', 'water', 'toilet', 'aed', 'food', 'service'];

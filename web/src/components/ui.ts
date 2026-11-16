@@ -7,8 +7,6 @@ export const BTN_PRIMARY =
 export const BTN_GHOST =
   'rounded-xl border border-line px-3 py-1.5 text-[13px] text-muted transition hover:text-ink hover:border-line-strong';
 
-export const BTN_QUIET = 'px-0.5 py-0.5 text-muted transition hover:text-ink';
-
 export const FIELD_INPUT =
   'w-full rounded-[9px] border border-line bg-panel-soft px-3 py-2.5 text-[13px] text-ink placeholder:text-muted/70 focus:border-brand focus:outline-none';
 

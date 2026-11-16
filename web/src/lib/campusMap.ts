@@ -5,7 +5,6 @@ import {
   METRES_PER_DEG_LAT,
   pointInRing,
   shortCode,
-  zoneOf,
   type Category,
 } from './geo';
 import type {
@@ -24,6 +23,12 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
    offline the illustration underneath still works. */
 const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const MAX_TILES = 42;
+
+/* Marker sizes in map units (metres on the ground), so they scale with the map like
+   the buildings do. Halved from the original illustration: at 18 units a building pin
+   covered most of the footprint it was pointing at. */
+const NODE_SIZE = { building: 9, place: 7, entrance: 6.5 } as const;
+const SERVICE_RADIUS = 3.5;
 
 export interface ScaleInfo {
   width: number;
@@ -195,15 +200,15 @@ export class CampusMap {
       route.path.forEach((point, i) => {
         const xy = dots[i];
         layer.appendChild(
-          el('circle', { cx: xy.x, cy: xy.y, r: (i === 0 ? 9 : 6), class: 'route-dot' }),
+          el('circle', { cx: xy.x, cy: xy.y, r: i === 0 ? 4.5 : 3, class: 'route-dot' }),
         );
         layer.appendChild(
-          el('circle', { cx: xy.x, cy: xy.y, r: (i === 0 ? 4 : 3), class: 'route-pin' }),
+          el('circle', { cx: xy.x, cy: xy.y, r: i === 0 ? 2 : 1.5, class: 'route-pin' }),
         );
         if (i === 0 || i === route.path.length - 1) {
           const label = el('text', {
-            x: xy.x + 12,
-            y: xy.y - 10,
+            x: xy.x + 6,
+            y: xy.y - 5,
             class: 'node-label route-label',
           });
           label.textContent = (i === 0 ? 'START · ' : 'GOAL · ') + point.name;
@@ -226,7 +231,7 @@ export class CampusMap {
       if (facility.lat == null || facility.lng == null) return;
       const p = this.project(facility.lat, facility.lng);
       layer.appendChild(
-        el('circle', { cx: p.x, cy: p.y, r: 26, class: 'fac-pin pulse' }),
+        el('circle', { cx: p.x, cy: p.y, r: 13, class: 'fac-pin pulse' }),
       );
     });
   }
@@ -422,8 +427,6 @@ export class CampusMap {
       .map((item) => {
         const coords = item.ring.map(([lat, lng]) => this.project(lat, lng));
         const north = Math.max(...item.ring.map((p) => p[0]));
-        // which campus zone does this footprint belong to? nearest lettered building
-        let zone: 1 | 2 | 3 | 4 = 1;
         let nearest: GraphNode | null = null;
         let ownerDistance = Infinity;
         const centre = item.ring.reduce<[number, number]>(
@@ -438,7 +441,6 @@ export class CampusMap {
             nearest = building;
           }
         }
-        if (nearest) zone = zoneOf(shortCode(nearest.name));
 
         // Which letter belongs on this roof? The polygon's own name first, then the
         // footprint it stands inside, and only then the nearest node.
@@ -457,7 +459,6 @@ export class CampusMap {
           coords,
           north,
           height,
-          zone,
           tone,
           badge,
           kind: item.kind || 'building',
@@ -567,29 +568,29 @@ export class CampusMap {
         const cat = categoryOf(node);
         g.classList.add('cat-' + cat);
         this.serviceGroups.push({ el: g, cat });
-        g.appendChild(el('circle', { cx: p.x, cy: p.y, r: 7 }));
+        g.appendChild(el('circle', { cx: p.x, cy: p.y, r: SERVICE_RADIUS }));
       } else {
-        const size = (node.kind === 'entrance' ? 13 : node.kind === 'place' ? 14 : 18);
+        const size = NODE_SIZE[node.kind as keyof typeof NODE_SIZE];
         // a shadowed face under the block: the cheapest honest nod to 2.5D
         if (node.kind !== 'entrance' && node.kind !== 'place') {
           g.appendChild(
             el('rect', {
-              x: p.x - size / 2 + 3.5,
-              y: p.y - size / 2 + 3.5,
+              x: p.x - size / 2 + size * 0.19,
+              y: p.y - size / 2 + size * 0.19,
               width: size,
               height: size,
-              rx: 3,
+              rx: size * 0.17,
               class: 'node-shadow',
             }),
           );
           for (let i = 0; i < 3; i += 1) {
             const angle = hash01(node.id, i) * Math.PI * 2;
-            const radius = (13 + hash01(node.id, i + 10) * 11);
+            const radius = 13 + hash01(node.id, i + 10) * 11;
             nodeLayer.appendChild(
               el('circle', {
                 cx: p.x + Math.cos(angle) * radius,
                 cy: p.y + Math.sin(angle) * radius,
-                r: (2 + hash01(node.id, i + 20) * 1.6),
+                r: (1 + hash01(node.id, i + 20) * 0.8),
                 class: 'tree',
               }),
             );
@@ -601,11 +602,11 @@ export class CampusMap {
             y: p.y - size / 2,
             width: size,
             height: size,
-            rx: 3,
+            rx: size * 0.17,
           }),
         );
         if (node.kind === 'building') {
-          const code = el('text', { x: p.x, y: p.y + 3.1, class: 'node-code' });
+          const code = el('text', { x: p.x, y: p.y + size * 0.17, class: 'node-code' });
           code.textContent = shortCode(node.name);
           g.appendChild(code);
         }
@@ -616,8 +617,8 @@ export class CampusMap {
 
       if (node.kind === 'building') {
         const label = el('text', {
-          x: p.x + 11,
-          y: p.y + 4,
+          x: p.x + 6,
+          y: p.y + 2,
           class: 'node-label building-label',
         });
         label.textContent = node.name.length > 26 ? node.name.slice(0, 25) + '…' : node.name;
@@ -654,8 +655,8 @@ export class CampusMap {
       edge.path && edge.path.length >= 2
         ? edge.path.map(([lat, lng]) => this.project(lat, lng))
         : [this.project(a.lat, a.lng), this.project(b.lat, b.lng)];
-    const spacing = 5.5;
-    const half = 3.4;
+    const spacing = 2.75;
+    const half = 1.7;
     for (let i = 1; i < points.length; i += 1) {
       const p0 = points[i - 1];
       const p1 = points[i];

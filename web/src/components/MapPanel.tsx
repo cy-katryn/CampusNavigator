@@ -124,7 +124,7 @@ export function MapPanel(props: MapPanelProps) {
         {badge ? (
           <div
             data-route-badge
-            className="absolute bottom-3 left-1/2 z-[3] -translate-x-1/2 rounded-full bg-[var(--route)] px-3 py-[5px] text-[11.5px] font-semibold tracking-[0.02em] text-white shadow-[0_6px_16px_var(--accent-ring)]"
+            className="absolute bottom-3 left-1/2 z-[3] -translate-x-1/2 rounded-full bg-[var(--route-1)] px-3 py-[5px] text-[11.5px] font-semibold tracking-[0.02em] text-white shadow-[0_6px_16px_var(--accent-ring)]"
           >
             {badge}
           </div>

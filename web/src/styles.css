@@ -70,19 +70,16 @@
      Not the brand red: the building walls are rust (109, 48, 16), so a red line
      disappears into the model. Navy is the one hue that appears nowhere else on the
      map -- walls are rust, roofs grey, water pale blue, lawns green -- and it reads as
-     "this is the way" without shouting. */
-  --route:            #173a7a;
-  --route-casing:     #ffffff;
-  --route-pin:        #0d2148;   /* the solid centre of each stop */
+     "this is the way" without shouting.
 
-  /* -- alternative routes ----------------------------------------------------
-     When the search offers more than one way there, they are drawn together. Four
-     hues that appear nowhere else on the map, in order: navy (shortest), teal, amber,
-     purple. Each keeps the white casing, so all four read over roofs and lawns. */
+     Four hues for up to four ways there, in order: navy (shortest), teal, amber,
+     purple. Each keeps the white casing, so all of them read over roofs and lawns. */
   --route-1:          #173a7a;
   --route-2:          #0f766e;
   --route-3:          #b45309;
   --route-4:          #6b5b95;
+  --route-casing:     #ffffff;
+  --route-pin:        #0d2148;   /* the solid centre of each stop */
 
   /* -- campus map -- */
   --map-bg:           #f2efe9;   /* warm land, like a real basemap */
@@ -337,11 +334,13 @@ html, body {
   filter: drop-shadow(0 1px 2px var(--accent-ring));
 }
 /* a cheap 2.5D hint: a second block offset down-right, read as the shadowed face */
-/* the letter inside a building block: Core A, Block L, Block VA */
+/* the letter inside a building block: Core A, Block L, Block VA.
+   Sized to the pin it sits in -- the box is 9 map units now, so a 10.5px glyph
+   would spill out of it. */
 .node-code {
-  fill: var(--polyu-red-dark); font-size: 10.5px; font-weight: 700;
+  fill: var(--polyu-red-dark); font-size: 5.5px; font-weight: 700;
   font-family: var(--font); text-anchor: middle; pointer-events: none;
-  paint-order: stroke; stroke: var(--panel); stroke-width: 2.2;
+  paint-order: stroke; stroke: var(--panel); stroke-width: 1.1;
   stroke-linejoin: round;
 }
 .node.entrance .node-code { fill: var(--on-accent); stroke: none; }
@@ -384,11 +383,11 @@ html, body {
   stroke-linecap: round; stroke-linejoin: round; opacity: .92;
 }
 .route-line {
-  stroke: var(--route); stroke-width: 2.5; fill: none;
+  stroke: var(--route-1); stroke-width: 2.5; fill: none;
   stroke-linecap: round; stroke-linejoin: round;
 }
 .route-dot {
-  fill: var(--route-casing); stroke: var(--route);
+  fill: var(--route-casing); stroke: var(--route-1);
   stroke-width: 2;
 }
 .route-pin { fill: var(--route-pin); }
