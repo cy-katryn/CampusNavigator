@@ -85,6 +85,9 @@ export class CampusMap {
   private serviceGroups: { el: SVGGElement; cat: Category }[] = [];
   private drag: { x: number; y: number; vx: number; vy: number } | null = null;
   private teardown: (() => void)[] = [];
+  private routes: RouteOption[] = [];
+  private selectedRoute = 0;
+  private facilities: FacilityCard[] = [];
 
   constructor(svg: SVGSVGElement, opts: MapOptions) {
     this.svg = svg;
@@ -126,7 +129,7 @@ export class CampusMap {
 
   setShowDoors(on: boolean): void {
     this.showDoors = on;
-    this.drawGraph();
+    this.drawNodes();
   }
 
   /**
@@ -135,19 +138,28 @@ export class CampusMap {
    * three sets of pins on one line is unreadable.
    */
   setRoutes(routes: RouteOption[], selected: number): void {
+    this.routes = routes;
+    this.selectedRoute = selected;
+    this.renderRoutes();
+    const chosen = routes[Math.max(0, Math.min(selected, routes.length - 1))];
+    if (chosen) this.fitTo(chosen.path.map((p) => this.project(p.lat, p.lng)));
+  }
+
+  /** The route layer alone: called again when only the zoom (and so the pin size) moved. */
+  private renderRoutes(): void {
     const layer = layerOf('layer-route');
     if (!layer) return;
     layer.innerHTML = '';
     this.svg.classList.toggle('no-links', !this.showLinks);
+    const routes = this.routes;
     if (!routes.length) return;
 
-    const chosen = Math.max(0, Math.min(selected, routes.length - 1));
+    const chosen = Math.max(0, Math.min(this.selectedRoute, routes.length - 1));
     // draw the others first so the chosen line is never buried under them
     const order = routes
       .map((route, index) => ({ route, index }))
       .sort((a, b) => (a.index === chosen ? 1 : 0) - (b.index === chosen ? 1 : 0));
 
-    let chosenPoints: Point[] = [];
     order.forEach(({ route, index }) => {
       const isChosen = index === chosen;
       const dots = route.path.map((p) => this.project(p.lat, p.lng));
@@ -159,7 +171,6 @@ export class CampusMap {
         }
       });
       const points = shaped.length >= 2 ? shaped : dots;
-      if (isChosen) chosenPoints = dots;
       const d = points
         .map((p, i) => (i ? 'L' : 'M') + p.x.toFixed(2) + ' ' + p.y.toFixed(2))
         .join(' ');
@@ -172,7 +183,10 @@ export class CampusMap {
         line.setAttribute('style', `stroke: ${colour}`);
       } else {
         casing.setAttribute('style', 'stroke-width: 3.5; opacity: .55');
-        line.setAttribute('style', `stroke: ${colour}; stroke-width: 2; opacity: .55`);
+        line.setAttribute(
+          'style',
+          `stroke: ${colour}; stroke-width: 2; opacity: .55`,
+        );
       }
       layer.appendChild(casing);
       layer.appendChild(line);
@@ -181,30 +195,39 @@ export class CampusMap {
       route.path.forEach((point, i) => {
         const xy = dots[i];
         layer.appendChild(
-          el('circle', { cx: xy.x, cy: xy.y, r: i === 0 ? 9 : 6, class: 'route-dot' }),
+          el('circle', { cx: xy.x, cy: xy.y, r: (i === 0 ? 9 : 6), class: 'route-dot' }),
         );
         layer.appendChild(
-          el('circle', { cx: xy.x, cy: xy.y, r: i === 0 ? 4 : 3, class: 'route-pin' }),
+          el('circle', { cx: xy.x, cy: xy.y, r: (i === 0 ? 4 : 3), class: 'route-pin' }),
         );
         if (i === 0 || i === route.path.length - 1) {
-          const label = el('text', { x: xy.x + 12, y: xy.y - 10, class: 'node-label route-label' });
+          const label = el('text', {
+            x: xy.x + 12,
+            y: xy.y - 10,
+            class: 'node-label route-label',
+          });
           label.textContent = (i === 0 ? 'START · ' : 'GOAL · ') + point.name;
           layer.appendChild(label);
         }
       });
     });
-
-    if (chosenPoints.length) this.fitTo(chosenPoints);
   }
 
   setFacilities(facilities: FacilityCard[]): void {
+    this.facilities = facilities;
+    this.renderFacilities();
+  }
+
+  private renderFacilities(): void {
     const layer = layerOf('layer-facilities');
     if (!layer) return;
     layer.innerHTML = '';
-    facilities.forEach((facility) => {
+    this.facilities.forEach((facility) => {
       if (facility.lat == null || facility.lng == null) return;
       const p = this.project(facility.lat, facility.lng);
-      layer.appendChild(el('circle', { cx: p.x, cy: p.y, r: 26, class: 'fac-pin pulse' }));
+      layer.appendChild(
+        el('circle', { cx: p.x, cy: p.y, r: 26, class: 'fac-pin pulse' }),
+      );
     });
   }
 
@@ -499,9 +522,15 @@ export class CampusMap {
 
   // -- places and walkways -------------------------------------------------
   private drawGraph(): void {
+    this.drawEdges();
+    this.drawNodes();
+    this.drawFootprints();
+    this.applyView();
+  }
+
+  private drawEdges(): void {
     const edgeLayer = layerOf('layer-edges');
-    const nodeLayer = layerOf('layer-nodes');
-    if (!edgeLayer || !nodeLayer || !this.graph) return;
+    if (!edgeLayer || !this.graph) return;
 
     edgeLayer.innerHTML = '';
     this.graph.edges.forEach((edge: GraphEdge) => {
@@ -519,6 +548,11 @@ export class CampusMap {
       edgeLayer.appendChild(line);
       if (edge.stairs) this.drawStairs(edgeLayer, edge, a, b);
     });
+  }
+
+  private drawNodes(): void {
+    const nodeLayer = layerOf('layer-nodes');
+    if (!nodeLayer || !this.graph) return;
 
     nodeLayer.innerHTML = '';
     this.serviceGroups = [];
@@ -535,7 +569,7 @@ export class CampusMap {
         this.serviceGroups.push({ el: g, cat });
         g.appendChild(el('circle', { cx: p.x, cy: p.y, r: 7 }));
       } else {
-        const size = node.kind === 'entrance' ? 13 : node.kind === 'place' ? 14 : 18;
+        const size = (node.kind === 'entrance' ? 13 : node.kind === 'place' ? 14 : 18);
         // a shadowed face under the block: the cheapest honest nod to 2.5D
         if (node.kind !== 'entrance' && node.kind !== 'place') {
           g.appendChild(
@@ -550,19 +584,25 @@ export class CampusMap {
           );
           for (let i = 0; i < 3; i += 1) {
             const angle = hash01(node.id, i) * Math.PI * 2;
-            const radius = 13 + hash01(node.id, i + 10) * 11;
+            const radius = (13 + hash01(node.id, i + 10) * 11);
             nodeLayer.appendChild(
               el('circle', {
                 cx: p.x + Math.cos(angle) * radius,
                 cy: p.y + Math.sin(angle) * radius,
-                r: 2 + hash01(node.id, i + 20) * 1.6,
+                r: (2 + hash01(node.id, i + 20) * 1.6),
                 class: 'tree',
               }),
             );
           }
         }
         g.appendChild(
-          el('rect', { x: p.x - size / 2, y: p.y - size / 2, width: size, height: size, rx: 3 }),
+          el('rect', {
+            x: p.x - size / 2,
+            y: p.y - size / 2,
+            width: size,
+            height: size,
+            rx: 3,
+          }),
         );
         if (node.kind === 'building') {
           const code = el('text', { x: p.x, y: p.y + 3.1, class: 'node-code' });
@@ -575,7 +615,11 @@ export class CampusMap {
       g.appendChild(tip);
 
       if (node.kind === 'building') {
-        const label = el('text', { x: p.x + 11, y: p.y + 4, class: 'node-label building-label' });
+        const label = el('text', {
+          x: p.x + 11,
+          y: p.y + 4,
+          class: 'node-label building-label',
+        });
         label.textContent = node.name.length > 26 ? node.name.slice(0, 25) + '…' : node.name;
         label.style.display = 'none';
         nodeLayer.appendChild(label);
@@ -591,8 +635,6 @@ export class CampusMap {
     });
 
     this.applyFilters();
-    this.drawFootprints();
-    this.applyView();
   }
 
   private edgeShape(edge: GraphEdge, a: GraphNode, b: GraphNode): string {
@@ -604,8 +646,9 @@ export class CampusMap {
   }
 
   /* A flight of steps is drawn as rungs instead of a plain line, because "walk 40 m
-     and you will meet steps" is different advice from "walk 40 m". Spacing is in
-     screen pixels so the shape survives zooming. */
+     and you will meet steps" is different advice from "walk 40 m". Spacing follows the
+     same zoom compensation as every other mark, so the rungs do not merge when you
+     zoom in. */
   private drawStairs(layer: SVGGElement, edge: GraphEdge, a: GraphNode, b: GraphNode): void {
     const points =
       edge.path && edge.path.length >= 2

@@ -269,7 +269,10 @@ html, body {
 /* a drawn path is a line, never a block */
 .fp-path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
 .fp-path-path   { stroke: var(--edge-casing); stroke-width: 1.2; }
-.fp-path-bridge { stroke: var(--line-strong); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.fp-path-bridge {
+  stroke: var(--line-strong); stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
 .fp-flat-green { fill: var(--fp-green); }
 .fp-flat-pitch { fill: var(--fp-green); stroke: var(--panel); stroke-width: 1; }
 .fp-shadow   { fill: #2f2a2f; opacity: .16; }
@@ -293,7 +296,8 @@ html, body {
 .roof-code {
   fill: var(--polyu-red-dark); font-size: 11px; font-weight: 700;
   font-family: var(--font); text-anchor: middle; pointer-events: none;
-  paint-order: stroke; stroke: var(--panel); stroke-width: 2.4; stroke-linejoin: round;
+  paint-order: stroke; stroke: var(--panel); stroke-width: 2.4;
+  stroke-linejoin: round;
 }
 #map.footprints .node-shadow, #map.footprints .tree { display: none; }
 #map.basemap .edge-casing { stroke: var(--panel); opacity: .75; stroke-width: 2.6; }
@@ -322,10 +326,14 @@ html, body {
   stroke-linecap: round; stroke-linejoin: round;
 }
 /* a flight of steps: rungs across the link, so it cannot be mistaken for a slope */
-.edge-stairs { stroke: var(--edge-stairs); stroke-width: 1.1; stroke-linecap: butt; }
+.edge-stairs {
+  stroke: var(--edge-stairs); stroke-width: 1.1;
+  stroke-linecap: butt;
+}
 .node { cursor: pointer; }
 .node.building rect {
-  fill: var(--node); stroke: var(--node-line); stroke-width: 1.4;
+  fill: var(--node); stroke: var(--node-line);
+  stroke-width: 1.4;
   filter: drop-shadow(0 1px 2px var(--accent-ring));
 }
 /* a cheap 2.5D hint: a second block offset down-right, read as the shadowed face */
@@ -333,20 +341,30 @@ html, body {
 .node-code {
   fill: var(--polyu-red-dark); font-size: 10.5px; font-weight: 700;
   font-family: var(--font); text-anchor: middle; pointer-events: none;
-  paint-order: stroke; stroke: var(--panel); stroke-width: 2.2; stroke-linejoin: round;
+  paint-order: stroke; stroke: var(--panel); stroke-width: 2.2;
+  stroke-linejoin: round;
 }
 .node.entrance .node-code { fill: var(--on-accent); stroke: none; }
 .node-shadow { fill: var(--node-line); opacity: .28; }
 .node:hover .node-shadow { fill: var(--accent); opacity: .2; }
 .tree { fill: var(--cat-recycle); opacity: .35; }
 
-.node.entrance rect { fill: var(--accent); stroke: var(--on-accent); stroke-width: 1.6; }
+.node.entrance rect {
+  fill: var(--accent); stroke: var(--on-accent);
+  stroke-width: 1.6;
+}
 /* "Main Locations" (Alumni Atrium, Amenities Centre, Campus Control Centre ...): an
    outlined block, not a filled one. Without this rule the rect had no fill at all and
    SVG paints an unstyled rect black. */
-.node.place rect { fill: var(--panel); stroke: var(--accent); stroke-width: 1.4; }
+.node.place rect {
+  fill: var(--panel); stroke: var(--accent);
+  stroke-width: 1.4;
+}
 .node.place .node-code { fill: var(--accent-dark); stroke: none; }
-.node.service circle { fill: var(--accent); stroke: var(--on-accent); stroke-width: 1.2; }
+.node.service circle {
+  fill: var(--accent); stroke: var(--on-accent);
+  stroke-width: 1.2;
+}
 .node.service.cat-recycle circle { fill: var(--cat-recycle); }
 .node.service.cat-water circle   { fill: var(--cat-water); }
 .node.service.cat-toilet circle  { fill: var(--cat-toilet); }
@@ -357,18 +375,23 @@ html, body {
 .node:hover rect, .node:hover circle { fill: var(--accent); }
 .node-label {
   fill: var(--muted); font-size: 11px; font-family: var(--font);
-  paint-order: stroke; stroke: var(--map-bg); stroke-width: 3; pointer-events: none;
+  paint-order: stroke; stroke: var(--map-bg); stroke-width: 3;
+  pointer-events: none;
 }
 /* the white casing underneath is what makes a route read on any background */
 .route-casing {
-  stroke: var(--route-casing); stroke-width: 5; fill: none; stroke-linecap: round;
-  stroke-linejoin: round; opacity: .92;
+  stroke: var(--route-casing); stroke-width: 5; fill: none;
+  stroke-linecap: round; stroke-linejoin: round; opacity: .92;
 }
 .route-line {
-  stroke: var(--route); stroke-width: 2.5; fill: none; stroke-linecap: round;
-  stroke-linejoin: round;
+  stroke: var(--route); stroke-width: 2.5; fill: none;
+  stroke-linecap: round; stroke-linejoin: round;
 }
-.route-dot { fill: var(--route-casing); stroke: var(--route); stroke-width: 2; }.route-pin { fill: var(--route-pin); }
+.route-dot {
+  fill: var(--route-casing); stroke: var(--route);
+  stroke-width: 2;
+}
+.route-pin { fill: var(--route-pin); }
 .fac-pin { fill: none; stroke: var(--warn); stroke-width: 3; }
 .fac-pin.pulse { animation: facPulse 1.6s infinite; transform-box: fill-box; transform-origin: center; }
 @keyframes facPulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }

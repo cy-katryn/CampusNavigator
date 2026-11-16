@@ -50,9 +50,11 @@ a fact that was not computed.
 ## What it does
 
 **Map** — extruded building blocks in PolyU red with grey roofs, paved squares and lawns
-painted flat, doorways, facility pins, and the walkway network. Routes appear only while you
-are navigating: up to three ways there, each in its own colour, with the chosen one drawn
-solid over the others. The legend in the bottom-left corner switches each layer on.
+painted flat, doorways, facility pins, and the walkway network. Pins, letters and line
+weights are drawn in map units, so they grow with the map as you zoom in, exactly as the
+buildings do. Routes appear only while you are navigating: up to three ways there, each in
+its own colour, with the chosen one drawn solid over the others. The legend in the
+bottom-left corner switches each layer on.
 
 **Chat** — asks in plain language for a route between two places, re-plans when you report a
 link closed, lists the nearest facility of a kind, quotes opening hours from the published
