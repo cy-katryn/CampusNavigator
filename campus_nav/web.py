@@ -24,7 +24,10 @@ Endpoints
     GET  /static/<file>    its assets
     GET  /api/status       engine mode, graph source, knowledge-base coverage
     GET  /api/graph        nodes + edges, for drawing the map
-    POST /api/chat         {"text": "..."} -> one reply, structured for the UI
+    POST /api/chat         {"text": "...", "lang": "zh-HK"} -> one reply (lang optional)
+    POST /api/route-draft   preview the start and destination without sending the question
+    GET  /api/speech-status   local Whisper availability and maximum recording length
+    POST /api/transcribe?lang=zh-HK    PCM WAV -> editable transcript
     POST /api/reset        clear the conversation state
 """
 from __future__ import annotations
@@ -38,7 +41,7 @@ import webbrowser
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from .config import (
     ENV_PATH,
@@ -49,12 +52,15 @@ from .config import (
     rel,
     shapes_path,
 )
-from .dialogue import Dialogue
+from .dialogue import Dialogue, RouteClarification
+from .facility_speech import facility_details, facility_summary, local_hours
 from .graph import CampusGraph
 from .kb import KnowledgeBase
 from .llm import OpenRouterClient
+from .local_names import building_name, floor_name, localize_label, place_name
 from .narrate import Narrator
 from .places import feature_height, shape_kind
+from .speech import MAX_WAV_BYTES, LocalTranscriber, SpeechError
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -170,7 +176,7 @@ def _oriented_segments(graph: CampusGraph, route) -> list[tuple]:
     return oriented
 
 
-def route_payload(graph: CampusGraph, route) -> dict | None:
+def route_payload(graph: CampusGraph, route, lang: str = "en-US") -> dict | None:
     """The route, with coordinates, so the browser can draw it without guessing."""
     if route is None:
         return None
@@ -180,7 +186,7 @@ def route_payload(graph: CampusGraph, route) -> dict | None:
     path = [
         {
             "id": node_id,
-            "name": graph.node(node_id).name,
+            "name": place_name(graph, node_id, lang),
             "lat": graph.node(node_id).lat,
             "lng": graph.node(node_id).lng,
         }
@@ -194,6 +200,7 @@ def route_payload(graph: CampusGraph, route) -> dict | None:
             "from": seg.u,
             "to": seg.v,
             "metres": round(seg.metres, 1),
+            "stairs": seg.stairs,
             "path": points,
         }
         for seg, points in _oriented_segments(graph, route)
@@ -201,6 +208,7 @@ def route_payload(graph: CampusGraph, route) -> dict | None:
 
     return {
         "reachable": route.reachable,
+        "avoid_stairs": bool(route.blocking.get("avoid_stairs")),
         "metres": round(route.total_metres, 1) if route.reachable else 0.0,
         "path": path,
         "segments": segments,
@@ -218,7 +226,7 @@ def route_payload(graph: CampusGraph, route) -> dict | None:
     }
 
 
-def route_option(graph: CampusGraph, route) -> dict | None:
+def route_option(graph: CampusGraph, route, lang: str = "en-US") -> dict | None:
     """One pickable way there: what the chooser shows, plus the line to draw."""
     if route is None or not route.reachable or len(route.path) < 2:
         return None
@@ -226,7 +234,7 @@ def route_option(graph: CampusGraph, route) -> dict | None:
     # the first real place after the start is the honest answer to "which way is this?"
     via = ""
     for node in places[1:-1]:
-        via = graph.node(node).name
+        via = place_name(graph, node, lang)
         break
     return {
         "metres": round(route.total_metres, 1),
@@ -234,12 +242,12 @@ def route_option(graph: CampusGraph, route) -> dict | None:
         "flights": sum(1 for seg in route.segments if seg.stairs),
         "covered": sum(1 for seg in route.segments if seg.covered),
         "via": via,
-        "start": graph.node(route.path[0]).name,
-        "goal": graph.node(route.path[-1]).name,
+        "start": place_name(graph, route.path[0], lang),
+        "goal": place_name(graph, route.path[-1], lang),
         "path": [
             {
                 "id": node_id,
-                "name": graph.node(node_id).name,
+                "name": place_name(graph, node_id, lang),
                 "lat": graph.node(node_id).lat,
                 "lng": graph.node(node_id).lng,
             }
@@ -251,7 +259,29 @@ def route_option(graph: CampusGraph, route) -> dict | None:
     }
 
 
-def spoken_summary(reply, graph: CampusGraph) -> str:
+def _clarification_summary(prompt: RouteClarification, graph: CampusGraph, lang: str) -> str:
+    """Keep the confirmed endpoint and the user's disputed words audible."""
+    origin_missing = prompt.role == "origin"
+    if lang == "zh-HK":
+        question = "你想由邊度出發？" if origin_missing else "你想去邊度？"
+        known = "目的地係" if origin_missing else "起點係"
+        unknown = f"我搵唔到「{prompt.query}」。"
+        ambiguous = f"「{prompt.query}」可能係以下幾個地方："
+    else:
+        question = "你从哪里出发？" if origin_missing else "你想去哪里？"
+        known = "目的地是" if origin_missing else "起点是"
+        unknown = f"我找不到“{prompt.query}”。"
+        ambiguous = f"“{prompt.query}”可能指以下几个地点："
+
+    context = f"{known}{localize_label(graph, prompt.known_place, lang)}。" if prompt.known_place else ""
+    if prompt.candidates:
+        context += ambiguous + "、".join(localize_label(graph, label, lang) for label in prompt.candidates) + "。"
+    elif prompt.query:
+        context += unknown
+    return context + question
+
+
+def spoken_summary(reply, graph: CampusGraph, lang: str = "en-US") -> str:
     """A sentence meant for ears, built only from computed facts.
 
     The screen shows the segment table; reading that table aloud would be noise. This
@@ -263,22 +293,43 @@ def spoken_summary(reply, graph: CampusGraph) -> str:
         # the handler said what to read out; the route summary would only contradict it
         return explicit
 
+    clarification = getattr(reply, "clarification", None)
+    if clarification and lang in ("zh-HK", "zh-CN"):
+        return _clarification_summary(clarification, graph, lang)
+
     route = getattr(reply, "route", None)
     if route is not None and route.reachable and route.path:
-        origin = graph.node(route.path[0]).name
-        destination = graph.node(route.path[-1]).name
-        legs = max(sum(1 for node in route.path if graph.node(node).kind != "waypoint") - 1, 1)
-        flights = sum(1 for seg in route.segments if seg.stairs)
-        extra = (
-            f", including {flights} flight{'s' if flights != 1 else ''} of steps"
-            if flights
-            else ""
-        )
-        return (
-            f"From {origin} to {destination} is about {route.total_metres:.0f} metres, "
-            f"in {legs} leg{'s' if legs != 1 else ''}{extra}."
-        )
+        origin = place_name(graph, route.path[0], lang)
+        destination = place_name(graph, route.path[-1], lang)
+        # The map rounds its one-decimal metre value with JavaScript Math.round.
+        metres = int(round(route.total_metres, 1) + 0.5)
+        stairs = any(seg.stairs for seg in route.segments)
+        avoiding_stairs = route.blocking.get("avoid_stairs")
+        if lang == "zh-HK":
+            summary = f"由{origin}行去{destination}，大約 {metres} 米。"
+            if avoiding_stairs:
+                return summary + "已避開地圖標示嘅樓梯。"
+            return summary + ("途中要行樓梯。" if stairs else "地圖冇標示呢條路線有樓梯。")
+        if lang == "zh-CN":
+            summary = f"从{origin}步行到{destination}，约 {metres} 米。"
+            if avoiding_stairs:
+                return summary + "已避开地图上标记的楼梯。"
+            return summary + ("途中需要走楼梯。" if stairs else "地图上这条路线没有标注楼梯。")
+        summary = f"From {origin} to {destination} is about {metres} metres."
+        if avoiding_stairs:
+            return summary + " This route avoids all stairs marked on the map."
+        return summary + (" The route includes stairs." if stairs else " No stairs are marked on this route.")
     if route is not None and not route.reachable:
+        if route.blocking.get("avoid_stairs"):
+            if lang == "zh-HK":
+                return "避開地圖標示嘅樓梯之後，按而家嘅條件搵唔到路線。"
+            if lang == "zh-CN":
+                return "避开地图上标记的楼梯后，按当前条件找不到路线。"
+            return "I couldn't find a route under the current restrictions that avoids all mapped stairs."
+        if lang == "zh-HK":
+            return "按而家嘅限制，搵唔到路線。你可以睇下畫面上嘅其他選擇。"
+        if lang == "zh-CN":
+            return "按当前条件找不到路线。你可以查看屏幕上的其他选项。"
         return "I could not find a route with those restrictions. The options are on screen."
     facilities = getattr(reply, "facilities", None) or []
     if facilities:
@@ -302,33 +353,51 @@ def spoken_summary(reply, graph: CampusGraph) -> str:
     return short[:320]
 
 
-def chat_payload(graph: CampusGraph, reply) -> dict:
-    speech = spoken_summary(reply, graph)
+def chat_payload(graph: CampusGraph, reply, lang: str = "en-US") -> dict:
+    clarification = getattr(reply, "clarification", None)
+    route = getattr(reply, "route", None)
+    explicit = getattr(reply, "spoken", "")
+    facilities = getattr(reply, "facilities", [])
+    facility_lead = facility_summary(reply, graph, lang) if lang in ("zh-HK", "zh-CN") else None
+    speech_lang = "en-US"
+    if facility_lead or (lang in ("zh-HK", "zh-CN") and not explicit and (clarification or route is not None)):
+        speech_lang = lang
+    speech = facility_lead or spoken_summary(reply, graph, speech_lang)
     # A reply that carries a route or a list of places has a short, friendly summary
     # (the same sentence that gets spoken). The UI leads with that and puts the
     # segment table / A* statistics behind a details toggle, so the interface does not
     # hand the user a receipt when a key is missing and a sentence when one is present.
-    structural = bool(getattr(reply, "spoken", "")
-                      or getattr(reply, "route", None) is not None
-                      or (getattr(reply, "facilities", None) or []))
+    structural = facility_lead or explicit or route is not None or facilities or (clarification and speech_lang != "en-US")
+    cards = list(facilities or [])
+    if lang in ("zh-HK", "zh-CN"):
+        cards = [
+            {**card,
+             "display_name": place_name(graph, card["node_id"], lang) if card.get("node_id") in graph.nodes
+                             else localize_label(graph, card["name"], lang),
+             "display_building": building_name(graph, card.get("building", ""), lang),
+             "display_floor": floor_name(card.get("floor", ""), lang),
+             "display_hours": local_hours(card.get("hours_today", ""), lang)}
+            for card in cards
+        ]
     return {
-        "text": reply.text,
+        "text": (facility_details(reply, graph, lang) or facility_lead) if facility_lead else reply.text,
         "lead": speech if structural else "",
         "speech": speech,
+        "speech_lang": speech_lang,
         "narrated": bool(getattr(reply, "narrated", False)),
         "notes": list(getattr(reply, "notes", []) or []),
         "intent": getattr(getattr(reply, "slots", None), "intent", ""),
         # which NLU implementation produced these slots: "llm" or "grammar"
         "parser": getattr(getattr(reply, "slots", None), "source", ""),
-        "route": route_payload(graph, getattr(reply, "route", None)),
+        "route": route_payload(graph, route, speech_lang),
         "routes": [
             option
             for option in (
-                route_option(graph, route) for route in (getattr(reply, "routes", None) or [])
+                route_option(graph, route, speech_lang) for route in (getattr(reply, "routes", None) or [])
             )
             if option is not None
         ],
-        "facilities": list(getattr(reply, "facilities", []) or []),
+        "facilities": cards,
     }
 
 
@@ -362,6 +431,7 @@ def write_env(updates: dict[str, str], path: Path = ENV_PATH) -> None:
 class App:
     def __init__(self) -> None:
         self.settings = get_settings()
+        self.transcriber = LocalTranscriber()
         self.graph = CampusGraph.load(graph_path())
         self.knowledge = KnowledgeBase.from_raw(RAW_DIR, self.graph)
         self.footprints = load_shapes(shapes_path())
@@ -416,6 +486,8 @@ class App:
                 {
                     "id": n.id,
                     "name": n.name,
+                    "names": {lang: place_name(self.graph, n.id, lang) for lang in ("zh-CN", "zh-HK")} if n.kind != "waypoint" else {},
+                    "aliases": [n.name_zh] if n.name_zh else [],
                     "lat": n.lat,
                     "lng": n.lng,
                     "kind": n.kind,
@@ -423,7 +495,6 @@ class App:
                     "building": n.building,
                     "service": n.service,
                     "accepts": list(n.accepts),
-                    "building": n.building,
                     "floor": n.floor,
                 }
                 for n in self.graph.nodes.values()
@@ -483,20 +554,40 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_static(path[len("/static/"):])
         if path == "/api/status":
             return self._json(self.app.status())
+        if path == "/api/speech-status":
+            return self._json(self.app.transcriber.status())
         if path == "/api/graph":
             return self._json(self.app.graph_payload())
         return self._json({"error": "not found"}, 404)
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
-        if path == "/api/chat":
+        if path == "/api/transcribe":
+            return self._transcribe()
+        if path in ("/api/chat", "/api/route-draft"):
             payload = self._read_json()
+            if not isinstance(payload, dict):
+                return self._json({"error": "Expected a question."}, 400)
             text = str(payload.get("text") or "").strip()
             if not text:
                 return self._json({"error": "empty message"}, 400)
-            with LOCK:
-                reply = self.app.dialogue.handle(text)
-            return self._json(chat_payload(self.app.graph, reply))
+            lang = payload.get("lang", "en-US")
+            if lang not in ("zh-CN", "zh-HK", "en-US"):
+                lang = "en-US"
+            if path == "/api/route-draft":
+                with LOCK:
+                    draft = self.app.dialogue.draft_endpoints(text)
+                if draft is None:
+                    return self._json({"is_route": False})
+                for item in draft.values():
+                    item["label"] = place_name(self.app.graph, item["id"], lang) if item["id"] else item["text"]
+                return self._json({"is_route": True, **draft})
+            try:
+                with LOCK:
+                    reply = self.app.dialogue.handle(text, endpoints=payload.get("endpoints"))
+            except ValueError as exc:
+                return self._json({"error": str(exc)}, 400)
+            return self._json(chat_payload(self.app.graph, reply, lang))
         if path == "/api/settings":
             payload = self._read_json()
             api_key = payload.get("api_key")
@@ -517,6 +608,30 @@ class Handler(BaseHTTPRequestHandler):
                 self.app.dialogue.state = type(self.app.dialogue.state)()
             return self._json({"ok": True})
         return self._json({"error": "not found"}, 404)
+
+    def _transcribe(self) -> None:
+        if self.headers.get_content_type() != "audio/wav":
+            return self._json({"error": "Send the recording as audio/wav."}, 415)
+        try:
+            length = int(self.headers.get("Content-Length", ""))
+        except ValueError:
+            return self._json({"error": "A recording length is required."}, 411)
+        if length <= 0:
+            return self._json({"error": "The recording is empty."}, 400)
+        if length > MAX_WAV_BYTES:
+            return self._json({"error": "Record up to 30 seconds at a time."}, 413)
+        lang = parse_qs(urlparse(self.path).query).get("lang", ["en-US"])[0]
+        try:
+            self.connection.settimeout(10)
+            audio = self.rfile.read(length)
+            if len(audio) != length:
+                raise SpeechError(400, "The recording is incomplete. Please record again.")
+            text = self.app.transcriber.transcribe(audio, lang)
+        except TimeoutError:
+            return self._json({"error": "The recording upload timed out. Try again."}, 408)
+        except SpeechError as exc:
+            return self._json({"error": str(exc)}, exc.status)
+        return self._json({"text": text, "lang": lang})
 
     def _serve_static(self, name: str) -> None:
         target = (STATIC_DIR / unquote(name)).resolve()

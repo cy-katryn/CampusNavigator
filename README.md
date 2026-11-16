@@ -70,6 +70,31 @@ bot> Route: Main Entrance -> Pao Yue-kong Library
        3. 254 m over 1 leg, 1 flight of steps
 ```
 
+## Using voice navigation
+
+Choose English, 普通话 or 廣東話 and press **Speak**. After dictating a route, review
+the transcript and the origin and destination. To correct a place, type its name
+in the corresponding field and choose a campus match. **Send** plans the route
+with the confirmed places and any spoken restrictions. For example, try
+“从图书馆到赛马会创新楼，不走楼梯” or “邊度有飲水機？”.
+With **Auto-read** on, the navigator reads replies in the selected language.
+**Replay** repeats the latest reply. Playback requires an appropriate system voice.
+
+For offline recognition, install the local recognizer once on the computer running
+the Python server. Setup requires Git, CMake, curl and a C/C++ compiler. It builds
+whisper.cpp and downloads and verifies a roughly 574 MB multilingual model.
+
+```bash
+python tools/setup_voice.py
+python -m campus_nav.web --open
+```
+
+Open the page on localhost or HTTPS and allow microphone access. Each recording
+can last up to 30 seconds. Without the local model, voice input uses the browser's
+speech recognition when supported, which may require internet access. To reuse
+an installation, set `WHISPER_CLI` and `WHISPER_MODEL` to its executable and
+model paths before starting the server.
+
 ## Data
 
 Four authored inputs, one generated file the app reads:
@@ -88,7 +113,7 @@ python tools/build.py graph          # rebuild after editing any GeoJSON
 python tools/build.py gaps           # where the walkway network does not join up
 python tools/build.py audit          # what is wrong with the structures file
 python tools/build.py names          # place names that will read badly
-python -m pytest tests -q            # 91 tests
+python -m unittest discover -s tests # run the tests
 ```
 
 `tools/build.py` is deterministic arithmetic on what you drew. It measures along your lines,
@@ -103,16 +128,16 @@ than inventing a route. To change the map: edit a GeoJSON in `data/authored/`, r
 | `campus_nav/` | the application: graph, A*/UCS search, dialogue, NLU, knowledge base, web server |
 | `web/` | the interface source: React 18 + TypeScript, styled with Tailwind, icons from Lucide, built by Vite |
 | `campus_nav/static/` | **generated** — the built interface the server serves |
-| `tools/build.py` | the only tool: build, audit, gaps, name report |
+| `tools/build.py` | build, audit, gaps, name report |
 | `data/raw_data/` | what Overpass and the PolyU sites published, untouched |
 | `data/authored/` | the GeoJSON you draw and edit |
-| `tests/` | 91 unittest-style tests, no network |
+| `tests/` | unittest suite, including voice and route regressions |
 
 ## Known limitations
 
 - **Opening hours are not linked to the map yet.** The knowledge base holds the published
   tables, but the join to the OSM-authored nodes was severed when the node set was rebuilt,
-  so hours questions currently answer abstain. 19 of the 91 tests encode that gap.
+  so hours questions currently answer abstain. Some opening-hours tests still expose this gap.
 - **No indoor geometry.** A facility inside a building is reached through the building; the
   reply gives the floor, not a corridor. Lifts and internal stairs are not modelled.
 - **The walkway network has gaps.** Footways that pass metres apart without a shared node

@@ -1,4 +1,4 @@
-import { Mic, Volume2, VolumeX } from 'lucide-react';
+import { Mic, RotateCcw, Volume2, VolumeX } from 'lucide-react';
 
 export type AvatarState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'error';
 
@@ -16,6 +16,10 @@ export interface AvatarDockProps {
   lang: string;
   micAvailable: boolean;
   micRecording: boolean;
+  micLabel: string;
+  canReplay: boolean;
+  languageLocked: boolean;
+  onReplay(): void;
   hint: string;
   onMic(): void;
   onToggleVoice(): void;
@@ -136,7 +140,7 @@ export function AvatarDock(props: AvatarDockProps) {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            title="Speak to the assistant (speech to text)"
+            id="mic" title="Dictate a question" aria-pressed={micRecording}
             disabled={!micAvailable}
             onClick={props.onMic}
             className={
@@ -147,12 +151,12 @@ export function AvatarDock(props: AvatarDockProps) {
             }
           >
             <Mic size={16} strokeWidth={1.9} aria-hidden="true" />
-            <span>Speak</span>
+            <span>{props.micLabel}</span>
           </button>
 
           <button
             type="button"
-            title="Read replies aloud (text to speech)"
+            id="speaker" title="Automatically read new replies" aria-pressed={voiceOn} disabled={!window.speechSynthesis}
             onClick={props.onToggleVoice}
             className={VOICE_BTN + (voiceOn ? ' border-brand bg-accent-soft text-brand' : '')}
           >
@@ -161,11 +165,18 @@ export function AvatarDock(props: AvatarDockProps) {
             ) : (
               <VolumeX size={16} strokeWidth={1.9} aria-hidden="true" />
             )}
-            <span>Voice</span>
+            <span>Auto-read</span>
           </button>
 
-          <label title="Recognition language">
+          <button id="replay" type="button" onClick={props.onReplay} disabled={!props.canReplay}
+            className={VOICE_BTN}>
+            <RotateCcw size={15} aria-hidden="true" />
+            {state === 'speaking' ? 'Stop' : 'Replay'}
+          </button>
+
+          <label title="Speech language">
             <select
+              id="lang" aria-label="Speech language" disabled={props.languageLocked}
               value={lang}
               onChange={(event) => props.onLangChange(event.target.value)}
               className="cursor-pointer rounded-[11px] border border-line bg-panel-soft px-2.5 py-2 font-sans text-[13px] text-ink"
@@ -177,7 +188,7 @@ export function AvatarDock(props: AvatarDockProps) {
           </label>
         </div>
 
-        <p className="m-0 text-[11px] leading-snug text-muted">{hint}</p>
+        <p id="voice-hint" role="status" className="m-0 text-[11px] leading-snug text-muted">{hint}</p>
       </div>
     </div>
   );

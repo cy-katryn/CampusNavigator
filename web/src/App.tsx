@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchGraph, fetchStatus, resetSession, sendChat } from './api';
+import { useRouteDraft } from './components/RouteDraft';
 import { ChatPanel } from './components/ChatPanel';
 import { MapPanel } from './components/MapPanel';
 import { SettingsDialog } from './components/SettingsDialog';
@@ -29,7 +30,9 @@ export default function App() {
   const [routeSelection, setRouteSelection] = useState(0);
   const [routeMessageId, setRouteMessageId] = useState<number | null>(null);
   const [facilities, setFacilities] = useState<FacilityCard[]>([]);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    { id: 0, role: 'bot', payload: { text: GREETING, route: null, facilities: [] } },
+  ]);
   const [draft, setDraft] = useState('');
   const [focusSignal, setFocusSignal] = useState(0);
   const [avatar, setAvatarState] = useState<AvatarState>('idle');
@@ -39,22 +42,19 @@ export default function App() {
 
   const mapRef = useRef<CampusMap | null>(null);
   const nextId = useRef(1);
-  const speaking = useRef(false);
-  const listening = useRef(false);
-  const recover = useRef<number | undefined>(undefined);
-
-  /* The face has five mutually exclusive states, and this is the only way to set
-     one. An error is a flash, not a home: it clears itself. */
-  const setAvatar = useCallback((mode: AvatarState) => {
-    window.clearTimeout(recover.current);
-    setAvatarState(mode);
-    if (mode === 'error') {
-      recover.current = window.setTimeout(
-        () => setAvatarState(speaking.current ? 'speaking' : 'idle'),
-        2600,
-      );
-    }
-  }, []);
+  const [busy, setBusy] = useState(false);
+  const pending = useRef(false);
+  const [dictated, setDictated] = useState(false);
+  const [lastReply, setLastReply] = useState<{ text: string; lang: string } | null>(null);
+  const [playHint, setPlayHint] = useState('');
+  const autoRead = useRef(voiceOn);
+  const recognition = useSpeechRecognition((text, final) => {
+    setDraft(text);
+    setDictated(final);
+  });
+  const routeDraft = useRouteDraft(draft, lang, graph, dictated);
+  const micActive = recognition.phase !== 'idle';
+  const micLabel = !micActive ? 'Speak' : recognition.phase === 'listening' ? 'Finish' : 'Cancel';
 
   const push = useCallback((role: ChatMessage['role'], payload: ChatPayload | string) => {
     const id = nextId.current;
@@ -63,65 +63,56 @@ export default function App() {
     return id;
   }, []);
 
-  const say = useCallback(
-    (text: string | undefined) => {
-      const started = voiceOn && text ? speak(text, lang, {
-        onStart: () => {
-          speaking.current = true;
-          setAvatar('speaking');
-        },
-        onEnd: () => {
-          speaking.current = false;
-          setAvatar(listening.current ? 'listening' : 'idle');
-        },
-      }) : false;
-      // nothing is going to be said -- do not leave the face stuck on "thinking"
-      if (!started) setAvatar(listening.current ? 'listening' : 'idle');
-    },
-    [lang, setAvatar, voiceOn],
-  );
+  const stopPlayback = () => {
+    cancelSpeech();
+    setAvatarState('idle');
+  };
 
-  const send = useCallback(
-    async (text: string) => {
-      const trimmed = (text || '').trim();
-      if (!trimmed) return;
-      push('user', trimmed);
-      setDraft('');
-      setAvatar('thinking');
-      try {
-        const payload = await sendChat(trimmed);
-        if (payload.error) {
-          push('bot', { text: 'Server error: ' + payload.error, route: null, facilities: [] });
-          setAvatar('idle');
-          return;
-        }
-        const id = push('bot', payload);
-        const options = payload.routes && payload.routes.length ? payload.routes : [];
-        setRoutes(options);
-        setRouteSelection(0);
-        setRouteMessageId(options.length ? id : null);
-        setFacilities(payload.facilities || []);
-        say(payload.speech);
-      } catch (error) {
-        push('bot', { text: 'Could not reach the engine: ' + String(error), route: null, facilities: [] });
-        // the one thing the face knows that the text does not: the engine is gone
-        setAvatar('error');
-      }
-    },
-    [push, say, setAvatar],
-  );
+  const play = (reply: {text: string; lang: string}) => {
+    setPlayHint('');
+    setAvatarState('speaking');
+    const started = speak(reply.text, reply.lang, (error) => {
+      setAvatarState('idle');
+      if (error) setPlayHint(error);
+    });
+    if (!started) setAvatarState('idle');
+  };
 
-  const recognition = useSpeechRecognition({
-    onTranscript: (text, isFinal) => {
-      setDraft(text);
-      if (isFinal) void send(text);
-    },
-    onListeningChange: (isListening) => {
-      listening.current = isListening;
-      if (isListening) setAvatar('listening');
-      else if (!speaking.current) setAvatar('idle');
-    },
-  });
+  const send = async (text: string, fromComposer = false) => {
+    const trimmed = text.trim();
+    if (!trimmed || pending.current || (fromComposer && (micActive || routeDraft.blocked))) return;
+    pending.current = true;
+    setBusy(true);
+    recognition.cancel();
+    stopPlayback();
+    const endpoints = fromComposer ? routeDraft.endpoints : undefined;
+    const confirmation = fromComposer ? routeDraft.confirmation : undefined;
+    push('user', confirmation ? trimmed + '\n' + confirmation : trimmed);
+    setDraft('');
+    setDictated(false);
+    setAvatarState('thinking');
+    setPlayHint('');
+    try {
+      const payload = await sendChat(trimmed, lang, endpoints);
+      if (payload.error) throw new Error(payload.error);
+      const id = push('bot', payload);
+      const options = payload.routes || [];
+      setRoutes(options);
+      setRouteSelection(0);
+      setRouteMessageId(options.length ? id : null);
+      setFacilities(payload.facilities || []);
+      const reply = payload.speech ? { text: payload.speech, lang: payload.speech_lang || lang } : null;
+      setLastReply(reply);
+      if (reply && autoRead.current) play(reply);
+      else setAvatarState('idle');
+    } catch (error) {
+      push('bot', { text: String(error), route: null, facilities: [] });
+      setAvatarState('error');
+    } finally {
+      pending.current = false;
+      setBusy(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -145,23 +136,36 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    push('bot', { text: GREETING, route: null, facilities: [] });
-    // the greeting is the opening turn, not a reaction to state
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Some browsers populate their voice list only after the first request.
+    window.speechSynthesis?.getVoices();
+    return cancelSpeech;
   }, []);
 
   const reset = async () => {
-    await resetSession();
-    setMessages([]);
-    setRoutes([]);
-    setRouteSelection(0);
-    setRouteMessageId(null);
-    setFacilities([]);
-    mapRef.current?.clearOverlays();
-    cancelSpeech();
-    speaking.current = false;
-    setAvatar('idle');
-    push('bot', { text: 'Conversation cleared. Where would you like to go?', route: null, facilities: [] });
+    if (pending.current) return;
+    pending.current = true;
+    setBusy(true);
+    recognition.cancel();
+    stopPlayback();
+    setDraft('');
+    setDictated(false);
+    setLastReply(null);
+    setPlayHint('');
+    try {
+      await resetSession();
+      setMessages([]);
+      setRoutes([]);
+      setRouteSelection(0);
+      setRouteMessageId(null);
+      setFacilities([]);
+      mapRef.current?.clearOverlays();
+      push('bot', { text: 'Conversation cleared. Where would you like to go?', route: null, facilities: [] });
+    } catch {
+      push('bot', { text: 'Could not reset the conversation. Try again.', route: null, facilities: [] });
+    } finally {
+      pending.current = false;
+      setBusy(false);
+    }
   };
 
   return (
@@ -179,17 +183,31 @@ export default function App() {
         <ChatPanel
           messages={messages}
           draft={draft}
-          avatar={avatar}
+          avatar={recognition.phase === 'listening' ? 'listening' : recognition.phase === 'transcribing' ? 'thinking' : avatar}
           voiceOn={voiceOn}
           lang={lang}
-          micAvailable={recognition.supported}
-          micRecording={recognition.listening}
-          hint={recognition.hint}
+          micAvailable={recognition.supported && !busy}
+          micRecording={micActive}
+          micLabel={micLabel}
+          languageLocked={micActive || busy}
+          busy={busy}
+          canReplay={Boolean(window.speechSynthesis && lastReply && !micActive && !busy)}
+          onReplay={() => {
+            if (avatar === 'speaking') stopPlayback();
+            else if (lastReply) play(lastReply);
+          }}
+          hint={playHint || recognition.hint}
+          editor={routeDraft.editor}
+          sendBlocked={busy || micActive || routeDraft.blocked || !draft.trim()}
           focusSignal={focusSignal}
           routeMessageId={routeMessageId}
           routeSelection={routeSelection}
-          onDraftChange={setDraft}
-          onSend={(text) => void send(text)}
+          onDraftChange={(text) => {
+            if (micActive) recognition.cancel();
+            if (!text.trim()) setDictated(false);
+            setDraft(text);
+          }}
+          onSend={(text) => void send(text, true)}
           onReset={() => void reset()}
           onFacilityClick={(name) => void send('how do I get to ' + name + '?')}
           onSelectRoute={(messageId, index) => {
@@ -197,16 +215,23 @@ export default function App() {
             setRouteSelection(index);
           }}
           onMic={() => {
-            cancelSpeech();
-            recognition.start(lang);
+            if (!micActive) {
+              setDictated(false);
+              stopPlayback();
+              setPlayHint('');
+            }
+            recognition.toggle(lang, draft);
           }}
           onToggleVoice={() => {
-            setVoiceOn((on) => {
-              if (on) cancelSpeech();
-              return !on;
-            });
+            autoRead.current = !voiceOn;
+            setVoiceOn(!voiceOn);
+            if (voiceOn && avatar === 'speaking') stopPlayback();
           }}
-          onLangChange={setLang}
+          onLangChange={(language) => {
+            stopPlayback();
+            setLang(language);
+            setPlayHint('');
+          }}
         />
 
         <MapPanel
@@ -216,6 +241,8 @@ export default function App() {
           facilities={facilities}
           mapRef={mapRef}
           onPrefill={(text) => {
+            recognition.cancel();
+            setDictated(false);
             setDraft(text);
             setFocusSignal((n) => n + 1);
           }}

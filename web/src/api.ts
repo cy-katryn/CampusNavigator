@@ -16,11 +16,11 @@ export async function fetchGraph(): Promise<Graph> {
   return readJSON<Graph>(await fetch('/api/graph'));
 }
 
-export async function sendChat(text: string): Promise<ChatPayload> {
+export async function sendChat(text: string, lang: string, endpoints?: Partial<Record<'origin' | 'destination', string>>): Promise<ChatPayload> {
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, lang, endpoints }),
   });
   // a server-side rejection still carries a message worth showing verbatim
   return (await response.json()) as ChatPayload;
