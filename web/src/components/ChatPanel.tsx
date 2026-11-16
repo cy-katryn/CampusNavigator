@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react';
+import { RotateCcw, Send } from 'lucide-react';
 import type { ChatMessage } from '../types';
 import { AvatarDock, type AvatarState } from './AvatarDock';
 import { Message } from './Message';
+import { BTN_GHOST, PANEL, PANEL_HEAD, PANEL_TITLE } from './ui';
 
 export interface ChatPanelProps {
   messages: ChatMessage[];
@@ -41,22 +43,21 @@ export function ChatPanel(props: ChatPanelProps) {
   }, [props.focusSignal]);
 
   return (
-    <section className="panel chat-panel">
-      <div className="panel-head">
-        <h2>Chat</h2>
-        <button className="ghost" type="button" onClick={props.onReset}>
+    <section className={PANEL}>
+      <div className={PANEL_HEAD}>
+        <h2 className={PANEL_TITLE}>Chat</h2>
+        <button type="button" onClick={props.onReset} className={BTN_GHOST + ' inline-flex items-center gap-1.5'}>
+          <RotateCcw size={13} aria-hidden="true" />
           Reset
         </button>
       </div>
 
-      <div className="chat" ref={chat}>
+      <div ref={chat} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-3.5">
         {props.messages.map((message) => (
           <Message
             key={message.id}
             message={message}
-            selection={
-              props.routeMessageId === message.id ? props.routeSelection : null
-            }
+            selection={props.routeMessageId === message.id ? props.routeSelection : null}
             onFacilityClick={props.onFacilityClick}
             onSelectRoute={(index) => props.onSelectRoute(message.id, index)}
           />
@@ -76,7 +77,8 @@ export function ChatPanel(props: ChatPanelProps) {
       />
 
       <form
-        className="composer"
+        className="flex gap-2 px-4 py-3"
+        data-composer-form
         onSubmit={(event) => {
           event.preventDefault();
           props.onSend(props.draft);
@@ -85,12 +87,20 @@ export function ChatPanel(props: ChatPanelProps) {
         <input
           ref={composer}
           type="text"
+          data-composer
           autoComplete="off"
           placeholder="Ask about a route, a facility, or opening hours…"
           value={props.draft}
           onChange={(event) => props.onDraftChange(event.target.value)}
+          className="min-w-0 flex-1 rounded-[11px] border border-line bg-panel-soft px-[13px] py-[11px] text-sm text-ink placeholder:text-muted/80 focus:border-brand focus:outline-none"
         />
-        <button type="submit">Send</button>
+        <button
+          type="submit"
+          className="inline-flex cursor-pointer items-center gap-1.5 rounded-[11px] bg-brand px-4 py-[11px] text-[13px] font-medium text-onaccent transition hover:brightness-110"
+        >
+          <Send size={14} aria-hidden="true" />
+          Send
+        </button>
       </form>
     </section>
   );

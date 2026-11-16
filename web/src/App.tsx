@@ -175,7 +175,7 @@ export default function App() {
         onSaved={setStatus}
       />
 
-      <main className="layout">
+      <main className="grid h-[calc(100vh-66px)] grid-cols-[minmax(430px,1fr)_minmax(420px,1.1fr)] gap-3.5 p-3.5 max-[1180px]:h-auto max-[1180px]:grid-cols-1">
         <ChatPanel
           messages={messages}
           draft={draft}

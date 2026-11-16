@@ -1,3 +1,5 @@
+import { Mic, Volume2, VolumeX } from 'lucide-react';
+
 export type AvatarState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'error';
 
 export const AVATAR_LABELS: Record<AvatarState, string> = {
@@ -24,7 +26,12 @@ export interface AvatarDockProps {
    JavaScript ever changes on it. */
 function Robot({ state }: { state: AvatarState }) {
   return (
-    <svg viewBox="0 0 200 200" className={'avatar ' + state} role="img" aria-label="Assistant robot face">
+    <svg
+      viewBox="0 0 200 200"
+      className={'avatar h-[88px] w-[88px] flex-none ' + state}
+      role="img"
+      aria-label="Assistant robot face"
+    >
       <defs>
         <radialGradient id="avatar-halo" cx="46%" cy="38%" r="62%">
           <stop offset="0%" className="halo-in" />
@@ -111,48 +118,66 @@ function Robot({ state }: { state: AvatarState }) {
   );
 }
 
+const VOICE_BTN =
+  'inline-flex cursor-pointer items-center gap-[7px] rounded-[11px] border border-line bg-panel-soft ' +
+  'px-[13px] py-2 text-[13px] text-ink transition hover:border-line-strong ' +
+  'disabled:cursor-not-allowed disabled:opacity-45';
+
 export function AvatarDock(props: AvatarDockProps) {
   const { state, voiceOn, lang, micAvailable, micRecording, hint } = props;
   return (
-    <div className="avatar-dock">
+    <div className="relative z-[2] mx-4 my-2 flex items-center gap-3 rounded-[14px] border border-line bg-panel px-3.5 py-2.5 shadow-[0_8px_20px_var(--accent-ring)]">
       <Robot state={state} />
-      <div className="avatar-meta">
-        <div className="avatar-state">{AVATAR_LABELS[state]}</div>
-        <div className="voice-row">
+      <div className="flex min-w-0 flex-1 flex-col gap-[7px]">
+        <div className="self-start rounded-full border border-line bg-panel-soft px-[9px] py-0.5 text-[10px] uppercase tracking-[0.14em] text-muted">
+          {AVATAR_LABELS[state]}
+        </div>
+
+        <div className="flex flex-wrap gap-2">
           <button
-            className={'icon-btn' + (micRecording ? ' recording' : '')}
             type="button"
             title="Speak to the assistant (speech to text)"
             disabled={!micAvailable}
             onClick={props.onMic}
+            className={
+              VOICE_BTN +
+              (micRecording
+                ? ' animate-[pulseRing_1.1s_infinite] border-danger bg-danger-soft text-danger'
+                : '')
+            }
           >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3z" />
-              <path d="M5 11a7 7 0 0 0 14 0M12 18v4" />
-            </svg>
+            <Mic size={16} strokeWidth={1.9} aria-hidden="true" />
             <span>Speak</span>
           </button>
+
           <button
-            className={'icon-btn' + (voiceOn ? ' on' : '')}
             type="button"
             title="Read replies aloud (text to speech)"
             onClick={props.onToggleVoice}
+            className={VOICE_BTN + (voiceOn ? ' border-brand bg-accent-soft text-brand' : '')}
           >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 9v6h4l5 4V5L8 9H4z" />
-              <path d="M16 9a4 4 0 0 1 0 6" />
-            </svg>
+            {voiceOn ? (
+              <Volume2 size={16} strokeWidth={1.9} aria-hidden="true" />
+            ) : (
+              <VolumeX size={16} strokeWidth={1.9} aria-hidden="true" />
+            )}
             <span>Voice</span>
           </button>
-          <label className="select-wrap" title="Recognition language">
-            <select value={lang} onChange={(event) => props.onLangChange(event.target.value)}>
+
+          <label title="Recognition language">
+            <select
+              value={lang}
+              onChange={(event) => props.onLangChange(event.target.value)}
+              className="cursor-pointer rounded-[11px] border border-line bg-panel-soft px-2.5 py-2 font-sans text-[13px] text-ink"
+            >
               <option value="en-US">English</option>
               <option value="zh-HK">廣東話</option>
               <option value="zh-CN">普通话</option>
             </select>
           </label>
         </div>
-        <p className="hint">{hint}</p>
+
+        <p className="m-0 text-[11px] leading-snug text-muted">{hint}</p>
       </div>
     </div>
   );

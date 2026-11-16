@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Maximize2, Minus, Map as MapIcon, Plus } from 'lucide-react';
 import { ALL_CATEGORIES, type Category } from '../lib/geo';
 import { CampusMap, type ScaleInfo } from '../lib/campusMap';
 import type { FacilityCard, Graph, GraphNode, RouteOption } from '../types';
 import { LayerLegend } from './LayerLegend';
 import { PlaceSearch } from './PlaceSearch';
+import { PANEL, PANEL_HEAD, PANEL_TITLE } from './ui';
 
 export interface MapPanelProps {
   graph: Graph | null;
@@ -14,6 +16,10 @@ export interface MapPanelProps {
   onPrefill(text: string): void;
   onSend(text: string): void;
 }
+
+const TOOL_BTN =
+  'grid h-[34px] w-[34px] cursor-pointer place-items-center rounded-lg border border-line ' +
+  'bg-panel text-ink shadow-[0_2px_8px_var(--accent-ring)] transition hover:border-brand';
 
 export function MapPanel(props: MapPanelProps) {
   const svg = useRef<SVGSVGElement>(null);
@@ -92,13 +98,13 @@ export function MapPanel(props: MapPanelProps) {
   };
 
   return (
-    <section className="panel map-panel">
-      <div className="panel-head">
-        <h2>Campus map</h2>
-        <span className="map-hint">click a place to route to it · scroll to zoom</span>
+    <section className={PANEL}>
+      <div className={PANEL_HEAD}>
+        <h2 className={PANEL_TITLE}>Campus map</h2>
+        <span className="text-[11px] text-muted">click a place to route to it · scroll to zoom</span>
       </div>
 
-      <div className="map-wrap">
+      <div className="relative min-h-0 flex-1 bg-[var(--map-bg)]">
         <svg
           id="map"
           ref={svg}
@@ -115,7 +121,14 @@ export function MapPanel(props: MapPanelProps) {
 
         <PlaceSearch nodes={props.graph ? props.graph.nodes : []} onChoose={choosePlace} />
 
-        {badge ? <div className="route-badge">{badge}</div> : null}
+        {badge ? (
+          <div
+            data-route-badge
+            className="absolute bottom-3 left-1/2 z-[3] -translate-x-1/2 rounded-full bg-[var(--route)] px-3 py-[5px] text-[11.5px] font-semibold tracking-[0.02em] text-white shadow-[0_6px_16px_var(--accent-ring)]"
+          >
+            {badge}
+          </div>
+        ) : null}
 
         <LayerLegend
           hidden={hidden}
@@ -128,45 +141,55 @@ export function MapPanel(props: MapPanelProps) {
           onHideAll={() => setHidden(new Set(ALL_CATEGORIES))}
         />
 
-        <div className="map-north" aria-hidden="true">
-          N<span>▲</span>
+        <div
+          aria-hidden="true"
+          className="absolute bottom-9 right-3.5 flex flex-col items-center text-[10px] font-bold tracking-[0.1em] text-muted"
+        >
+          N<span className="text-[11px] leading-none">▲</span>
         </div>
-        <div className="map-scale">
-          <b style={{ width: scale.width + 'px' }} />
+
+        <div className="absolute bottom-9 left-3.5 flex items-center gap-1.5 text-[10.5px] text-muted">
+          <b
+            className="block h-[5px] w-[60px] border border-b-0 border-muted"
+            style={{ width: scale.width + 'px' }}
+          />
           <span>{scale.label}</span>
         </div>
 
-        <div className="map-tools">
-          <button type="button" title="Zoom in" onClick={() => props.mapRef.current?.zoom(0.8)}>
-            +
+        <div className="absolute right-3 top-3 z-[6] flex flex-col gap-1.5">
+          <button type="button" title="Zoom in" className={TOOL_BTN} onClick={() => props.mapRef.current?.zoom(0.8)}>
+            <Plus size={16} aria-hidden="true" />
           </button>
-          <button type="button" title="Zoom out" onClick={() => props.mapRef.current?.zoom(1.25)}>
-            −
+          <button type="button" title="Zoom out" className={TOOL_BTN} onClick={() => props.mapRef.current?.zoom(1.25)}>
+            <Minus size={16} aria-hidden="true" />
           </button>
-          <button
-            type="button"
-            title="Fit the whole campus"
-            onClick={() => props.mapRef.current?.fitAll()}
-          >
-            ⤢
+          <button type="button" title="Fit the whole campus" className={TOOL_BTN} onClick={() => props.mapRef.current?.fitAll()}>
+            <Maximize2 size={15} aria-hidden="true" />
           </button>
           <button
             type="button"
-            className={basemap ? 'active' : ''}
             title={
               basemap
                 ? 'Basemap: street map (click for the illustrated campus)'
                 : 'Basemap: illustrated campus (click for the street map)'
             }
+            className={TOOL_BTN + (basemap ? ' border-brand bg-accent-soft text-brand' : '')}
             onClick={() => setBasemap((on) => !on)}
           >
-            ▣
+            <MapIcon size={15} aria-hidden="true" />
           </button>
         </div>
 
-        <div className={'map-tip' + (tip ? ' show' : '')}>{tip}</div>
+        <div
+          className={
+            'pointer-events-none absolute bottom-[30px] left-3 rounded-lg border border-line bg-panel-glass px-[9px] py-[5px] text-[11.5px] text-muted transition-opacity ' +
+            (tip ? 'opacity-100' : 'opacity-0')
+          }
+        >
+          {tip}
+        </div>
 
-        <footer className="attrib">
+        <footer className="absolute bottom-2 right-3 text-right text-[10.5px] text-muted">
           Basemap © OpenStreetMap contributors · Places: PolyU Campus Map &amp; GreenMap@PolyU
         </footer>
       </div>

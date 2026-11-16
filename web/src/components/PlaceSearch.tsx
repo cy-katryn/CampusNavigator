@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Search } from 'lucide-react';
 import { categoryOf } from '../lib/geo';
 import type { GraphNode } from '../types';
 
@@ -61,49 +62,62 @@ export function PlaceSearch({ nodes, onChoose }: PlaceSearchProps) {
   };
 
   return (
-    <div className="map-search" ref={wrap}>
-      <input
-        type="search"
-        autoComplete="off"
-        spellCheck={false}
-        placeholder="Search a place — library, Core D, AED…"
-        aria-label="Search for a place on campus"
-        value={query}
-        onChange={(event) => {
-          setQuery(event.target.value);
-          search(event.target.value);
-        }}
-        onFocus={() => {
-          if (query.trim().length >= 2) search(query);
-        }}
-        onKeyDown={(event) => {
-          if (event.key === 'ArrowDown' && hits.length) {
-            setActive((active + 1) % hits.length);
-            event.preventDefault();
-          } else if (event.key === 'ArrowUp' && hits.length) {
-            setActive((active - 1 + hits.length) % hits.length);
-            event.preventDefault();
-          } else if (event.key === 'Enter') {
-            choose(active >= 0 ? active : 0);
-            event.preventDefault();
-          } else if (event.key === 'Escape') {
-            setOpen(false);
-          }
-        }}
-      />
+    <div className="absolute left-3 right-[62px] top-3 z-[6]" ref={wrap}>
+      <div className="relative">
+        <Search
+          size={14}
+          aria-hidden="true"
+          className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted"
+        />
+        <input
+          type="search"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="Search a place — library, Core D, AED…"
+          aria-label="Search for a place on campus"
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            search(event.target.value);
+          }}
+          onFocus={() => {
+            if (query.trim().length >= 2) search(query);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowDown' && hits.length) {
+              setActive((active + 1) % hits.length);
+              event.preventDefault();
+            } else if (event.key === 'ArrowUp' && hits.length) {
+              setActive((active - 1 + hits.length) % hits.length);
+              event.preventDefault();
+            } else if (event.key === 'Enter') {
+              choose(active >= 0 ? active : 0);
+              event.preventDefault();
+            } else if (event.key === 'Escape') {
+              setOpen(false);
+            }
+          }}
+          className="w-full rounded-[10px] border border-line bg-panel py-2.5 pl-9 pr-3.5 text-[13px] text-ink shadow-[0_6px_18px_var(--accent-ring)] placeholder:text-muted/80 focus:border-brand focus:outline-none"
+        />
+      </div>
+
       {open ? (
-        <div className="search-results">
+        <div className="mt-1.5 max-h-[262px] overflow-y-auto rounded-[10px] border border-line bg-panel shadow-[0_14px_30px_var(--accent-ring)]">
           {hits.length ? (
             hits.map((hit, index) => (
               <div
                 key={hit.id}
-                className={'search-hit' + (index === active ? ' active' : '')}
                 onMouseDown={(event) => {
                   event.preventDefault();
                   choose(index);
                 }}
+                className={
+                  'flex cursor-pointer items-center gap-[9px] border-b border-panel-soft px-3 py-[9px] text-[12.5px] last:border-b-0 ' +
+                  (index === active ? 'bg-accent-soft' : 'hover:bg-accent-soft')
+                }
               >
                 <i
+                  className="h-2 w-2 flex-none rounded-full bg-brand"
                   style={
                     hit.kind === 'service' && hit.service
                       ? { background: 'var(--cat-' + categoryOf(hit) + ')' }
@@ -111,7 +125,7 @@ export function PlaceSearch({ nodes, onChoose }: PlaceSearchProps) {
                   }
                 />
                 <span>{hit.name}</span>
-                <span className="where">
+                <span className="ml-auto whitespace-nowrap text-[11px] text-muted">
                   {hit.kind === 'service'
                     ? hit.service || 'facility'
                     : hit.kind === 'entrance'
@@ -121,7 +135,7 @@ export function PlaceSearch({ nodes, onChoose }: PlaceSearchProps) {
               </div>
             ))
           ) : (
-            <div className="search-empty">No place matches that name.</div>
+            <div className="px-3 py-2.5 text-xs text-muted">No place matches that name.</div>
           )}
         </div>
       ) : null}

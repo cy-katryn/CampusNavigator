@@ -27,6 +27,11 @@ npm run build      # writes campus_nav/static/ — commit the result
 npm run dev        # hot reload, proxying /api to the Python app on :8000
 ```
 
+Components are styled with Tailwind utilities and take their colours from the palette
+block in `web/src/styles.css`; icons come from [Lucide](https://lucide.dev). That
+stylesheet keeps only what a utility cannot express: the palette, the avatar's paint and
+state animations, and the map layers the drawing code creates by class name.
+
 Without an API key the app runs on its grammar parser and template replies, which is the
 mode to fall back on if the demo Wi-Fi fails. With a key in `.env` (see `.env.example`) the
 model fills the slots and phrases the sentence; it never chooses the route and never states
@@ -94,7 +99,7 @@ than inventing a route. To change the map: edit a GeoJSON in `data/authored/`, r
 | Path | What |
 |---|---|
 | `campus_nav/` | the application: graph, A*/UCS search, dialogue, NLU, knowledge base, web server |
-| `web/` | the interface source: React 18 + TypeScript, built by Vite |
+| `web/` | the interface source: React 18 + TypeScript, styled with Tailwind, icons from Lucide, built by Vite |
 | `campus_nav/static/` | **generated** — the built interface the server serves |
 | `tools/build.py` | the only tool: build, audit, gaps, name report |
 | `data/raw_data/` | what Overpass and the PolyU sites published, untouched |
