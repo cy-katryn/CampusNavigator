@@ -12,9 +12,11 @@ discover that a virtualenv is broken. http.server ships with Python, so
 Python 3.10+. The API is four endpoints and about 200 lines, which is smaller than
 the dependency-management risk it replaces.
 
-The pages are hand-written HTML/CSS/JS in campus_nav/static/. No build step, no CDN,
-no npm -- so the demo also works offline, which matters because the speech-recognition
-fallback and the map must both keep working when the lecture-room Wi-Fi does not.
+The pages are built from web/ (React + TypeScript) into campus_nav/static/, and the
+built files are committed. Nothing here needs npm at run time, and nothing is
+fetched from a CDN -- so the demo also works offline, which matters because the
+speech-recognition fallback and the map must both keep working when the
+lecture-room Wi-Fi does not.
 
 Endpoints
 ---------

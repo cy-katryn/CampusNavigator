@@ -1,0 +1,684 @@
+import {
+  ALL_CATEGORIES,
+  categoryOf,
+  hash01,
+  METRES_PER_DEG_LAT,
+  pointInRing,
+  shortCode,
+  zoneOf,
+  type Category,
+} from './geo';
+import type { FacilityCard, Footprint, Graph, GraphEdge, GraphNode, RoutePayload } from '../types';
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/* A real street map underneath, so the campus sits on roads instead of a blank
+   page. Nothing is bundled: the browser fetches the few tiles the view needs, and
+   offline the illustration underneath still works. */
+const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const MAX_TILES = 42;
+
+export interface ScaleInfo {
+  width: number;
+  label: string;
+}
+
+export interface MapOptions {
+  onScale(info: ScaleInfo): void;
+  onPlaceClick(node: GraphNode): void;
+  onTip(text: string | null): void;
+}
+
+interface Bounds {
+  minLat: number;
+  maxLat: number;
+  minLng: number;
+  maxLng: number;
+  cos: number;
+}
+
+interface View {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+function el(name: string, attrs: Record<string, string | number>): SVGElement {
+  const node = document.createElementNS(SVG_NS, name);
+  Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, String(value)));
+  return node;
+}
+
+function layerOf(id: string): SVGGElement | null {
+  return document.getElementById(id) as SVGGElement | null;
+}
+
+/**
+ * Everything the campus map draws. The drawing stays imperative on purpose: it is
+ * a few hundred SVG elements rebuilt from data, and React re-rendering them on every
+ * pan frame would be slower and no clearer. React owns the chrome around it.
+ */
+export class CampusMap {
+  private readonly svg: SVGSVGElement;
+  private readonly opts: MapOptions;
+  private graph: Graph | null = null;
+  private nodes = new Map<string, GraphNode>();
+  private bounds: Bounds | null = null;
+  private view: View = { x: 0, y: 0, w: 800, h: 600 };
+  private basemap = true;
+  private showLinks = false;
+  private showDoors = false;
+  private hidden = new Set<Category>(ALL_CATEGORIES);
+  private serviceGroups: { el: SVGGElement; cat: Category }[] = [];
+  private drag: { x: number; y: number; vx: number; vy: number } | null = null;
+  private teardown: (() => void)[] = [];
+
+  constructor(svg: SVGSVGElement, opts: MapOptions) {
+    this.svg = svg;
+    this.opts = opts;
+    this.svg.classList.toggle('basemap', this.basemap);
+    this.svg.classList.toggle('no-links', !this.showLinks);
+    this.bindInteractions();
+  }
+
+  dispose(): void {
+    this.teardown.forEach((fn) => fn());
+    this.teardown = [];
+  }
+
+  // -- data in -------------------------------------------------------------
+  setGraph(graph: Graph): void {
+    this.graph = graph;
+    this.nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+    this.setupProjection();
+    this.drawGraph();
+  }
+
+  setHiddenCategories(hidden: Set<Category>): void {
+    this.hidden = new Set(hidden);
+    this.applyFilters();
+  }
+
+  setBasemap(on: boolean): void {
+    this.basemap = on;
+    this.svg.classList.toggle('basemap', on);
+    this.drawTiles();
+    this.drawFootprints();
+  }
+
+  setShowLinks(on: boolean): void {
+    this.showLinks = on;
+    this.svg.classList.toggle('no-links', !on);
+  }
+
+  setShowDoors(on: boolean): void {
+    this.showDoors = on;
+    this.drawGraph();
+  }
+
+  setRoute(route: RoutePayload | null): void {
+    this.drawRoute(route);
+  }
+
+  setFacilities(facilities: FacilityCard[]): void {
+    const layer = layerOf('layer-facilities');
+    if (!layer) return;
+    layer.innerHTML = '';
+    facilities.forEach((facility) => {
+      if (facility.lat == null || facility.lng == null) return;
+      const p = this.project(facility.lat, facility.lng);
+      layer.appendChild(el('circle', { cx: p.x, cy: p.y, r: 26, class: 'fac-pin pulse' }));
+    });
+  }
+
+  clearOverlays(): void {
+    const route = layerOf('layer-route');
+    const facilities = layerOf('layer-facilities');
+    if (route) route.innerHTML = '';
+    if (facilities) facilities.innerHTML = '';
+    this.svg.classList.toggle('no-links', !this.showLinks);
+  }
+
+  /** Pan and zoom so one place fills the view, as a map app does from its search box. */
+  focusPlace(node: GraphNode): void {
+    const p = this.project(node.lat, node.lng);
+    const span = 420;
+    this.view = { x: p.x - span / 2, y: p.y - span / 2, w: span, h: span * 0.72 };
+    this.applyView();
+  }
+
+  fitAll(): void {
+    if (!this.graph) return;
+    this.setupProjection();
+    this.drawRoute(null);
+  }
+
+  zoom(factor: number, cx?: number, cy?: number): void {
+    const v = this.view;
+    const b = this.bounds;
+    if (!b) return;
+    const limit = (b.maxLng - b.minLng) * METRES_PER_DEG_LAT * b.cos * 3;
+    const nw = Math.min(Math.max(v.w * factor, 120), limit);
+    const nh = nw * (v.h / v.w);
+    const px = cx == null ? v.x + v.w / 2 : cx;
+    const py = cy == null ? v.y + v.h / 2 : cy;
+    v.x = px - (px - v.x) * (nw / v.w);
+    v.y = py - (py - v.y) * (nh / v.h);
+    v.w = nw;
+    v.h = nh;
+    this.applyView();
+  }
+
+  // -- projection ----------------------------------------------------------
+  private setupProjection(): void {
+    const nodes = this.graph ? this.graph.nodes : [];
+    if (!nodes.length) return;
+    const lats = nodes.map((n) => n.lat);
+    const lngs = nodes.map((n) => n.lng);
+    const minLat = Math.min(...lats) - 0.0006;
+    const maxLat = Math.max(...lats) + 0.0006;
+    const minLng = Math.min(...lngs) - 0.0006;
+    const maxLng = Math.max(...lngs) + 0.0006;
+    const cos = Math.cos((((minLat + maxLat) / 2) * Math.PI) / 180);
+    this.bounds = { minLat, maxLat, minLng, maxLng, cos };
+    this.view = {
+      x: 0,
+      y: 0,
+      w: (maxLng - minLng) * METRES_PER_DEG_LAT * cos,
+      h: (maxLat - minLat) * METRES_PER_DEG_LAT,
+    };
+    this.applyView();
+  }
+
+  private project(lat: number, lng: number): Point {
+    const b = this.bounds as Bounds;
+    return {
+      x: (lng - b.minLng) * METRES_PER_DEG_LAT * b.cos,
+      y: (b.maxLat - lat) * METRES_PER_DEG_LAT,
+    };
+  }
+
+  private unproject(x: number, y: number): { lat: number; lng: number } {
+    const b = this.bounds as Bounds;
+    return {
+      lng: b.minLng + x / (METRES_PER_DEG_LAT * b.cos),
+      lat: b.maxLat - y / METRES_PER_DEG_LAT,
+    };
+  }
+
+  private applyView(): void {
+    const v = this.view;
+    this.svg.setAttribute('viewBox', v.x + ' ' + v.y + ' ' + v.w + ' ' + v.h);
+    // Names are expensive: a label appears only when there is room for it AND it is
+    // the kind of place worth naming at that zoom. Route labels are exempt.
+    const roofsAreLabelled = this.svg.classList.contains('footprints');
+    document.querySelectorAll<SVGTextElement>('.node-label:not(.route-label)').forEach((label) => {
+      const wanted = label.classList.contains('building-label')
+        ? v.w < 1400 && !roofsAreLabelled
+        : label.classList.contains('always');
+      label.style.display = wanted ? '' : 'none';
+    });
+    this.updateScale();
+    this.drawTiles();
+  }
+
+  /**
+   * A scale bar turned from real metres: the view is metres wide, so pixels per
+   * metre is just the panel width divided by the view width.
+   */
+  private updateScale(): void {
+    if (!this.bounds) return;
+    const rect = this.svg.getBoundingClientRect();
+    if (!rect.width) return;
+    const metresPerPx = this.view.w / rect.width;
+    const target = metresPerPx * 72;
+    const pow = Math.pow(10, Math.floor(Math.log10(target)));
+    const nice = [1, 2, 5, 10].map((m) => m * pow).find((value) => value >= target) || target;
+    this.opts.onScale({
+      width: Number((nice / metresPerPx).toFixed(1)),
+      label: nice >= 1000 ? (nice / 1000).toFixed(nice % 1000 ? 1 : 0) + ' km' : Math.round(nice) + ' m',
+    });
+  }
+
+  // -- basemap tiles -------------------------------------------------------
+  private tileZoom(): number {
+    const rect = this.svg.getBoundingClientRect();
+    if (!rect.width || !this.bounds) return 17;
+    const metresPerPixel = this.view.w / rect.width;
+    const lat = (this.bounds.minLat + this.bounds.maxLat) / 2;
+    const worldMetres = 156543.03392 * Math.cos((lat * Math.PI) / 180);
+    return Math.max(15, Math.min(19, Math.round(Math.log2(worldMetres / metresPerPixel))));
+  }
+
+  private drawTiles(): void {
+    const layer = layerOf('layer-tiles');
+    if (!layer) return;
+    layer.innerHTML = '';
+    if (!this.basemap || !this.bounds) return;
+
+    const z = this.tileZoom();
+    const nw = this.unproject(this.view.x, this.view.y);
+    const se = this.unproject(this.view.x + this.view.w, this.view.y + this.view.h);
+    const x0 = Math.floor(tileXOf(nw.lng, z));
+    const x1 = Math.floor(tileXOf(se.lng, z));
+    const y0 = Math.floor(tileYOf(nw.lat, z));
+    const y1 = Math.floor(tileYOf(se.lat, z));
+    if ((x1 - x0 + 1) * (y1 - y0 + 1) > MAX_TILES) return; // too far out: skip
+
+    for (let x = x0; x <= x1; x += 1) {
+      for (let y = y0; y <= y1; y += 1) {
+        const top = latAtTileY(y, z);
+        const bottom = latAtTileY(y + 1, z);
+        const left = lngAtTileX(x, z);
+        const right = lngAtTileX(x + 1, z);
+        const a = this.project(top, left);
+        const b = this.project(bottom, right);
+        layer.appendChild(
+          el('image', {
+            href: TILE_URL.replace('{z}', String(z))
+              .replace('{x}', String(x))
+              .replace('{y}', String(y)),
+            x: a.x,
+            y: a.y,
+            width: b.x - a.x,
+            height: b.y - a.y,
+            preserveAspectRatio: 'none',
+            class: 'tile',
+          }),
+        );
+      }
+    }
+  }
+
+  // -- 2.5D building blocks ------------------------------------------------
+  /* Take each building's real footprint, copy it straight up the screen by a height,
+     and fill the ribbon between the two copies -- that ribbon is the wall, the lifted
+     copy is the roof. Walls first, then roofs, sorted north to south. */
+  private drawFootprints(): void {
+    const layer = layerOf('layer-footprints');
+    if (!layer || !this.graph) return;
+    layer.innerHTML = '';
+    const all = this.graph.footprints || [];
+    const active = all.length > 0;
+    this.svg.classList.toggle('footprints', active);
+    if (!active) return;
+
+    const maxHeight =
+      parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fp-height')) || 20;
+
+    // drawn paths first, so blocks sit on top of them
+    all
+      .filter((item) => item.line)
+      .forEach((item) => {
+        const pts = item.ring.map(([lat, lng]) => this.project(lat, lng));
+        const d = pts.map((p, i) => (i ? 'L' : 'M') + p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' ');
+        layer.appendChild(el('path', { d, class: 'fp-path fp-path-' + (item.kind || 'path') }));
+      });
+
+    const rings: Footprint[] = all.filter((item) => !item.line);
+    const buildings = [...this.nodes.values()].filter((n) => n.kind === 'building');
+
+    const blocks = rings
+      .map((item) => {
+        const coords = item.ring.map(([lat, lng]) => this.project(lat, lng));
+        const north = Math.max(...item.ring.map((p) => p[0]));
+        // which campus zone does this footprint belong to? nearest lettered building
+        let zone: 1 | 2 | 3 | 4 = 1;
+        let nearest: GraphNode | null = null;
+        let ownerDistance = Infinity;
+        const centre = item.ring.reduce<[number, number]>(
+          (acc, p) => [acc[0] + p[0] / item.ring.length, acc[1] + p[1] / item.ring.length],
+          [0, 0],
+        );
+        for (const building of buildings) {
+          // deg^2 is fine for "nearest": ~110 km/deg, so 1 deg^2 is about 1.2e10 m^2
+          const d = (building.lat - centre[0]) ** 2 + (building.lng - centre[1]) ** 2;
+          if (d < ownerDistance) {
+            ownerDistance = d;
+            nearest = building;
+          }
+        }
+        if (nearest) zone = zoneOf(shortCode(nearest.name));
+
+        // Which letter belongs on this roof? The polygon's own name first, then the
+        // footprint it stands inside, and only then the nearest node.
+        let badge = item.name ? shortCode(item.name) : '';
+        if (!badge) {
+          const outer = rings.find(
+            (other) => other !== item && other.name && pointInRing(centre[1], centre[0], other.ring),
+          );
+          if (outer?.name) badge = shortCode(outer.name);
+        }
+        if (!badge && nearest) badge = shortCode(nearest.name);
+        // a hand-drawn shape may carry its own height; otherwise vary it deterministically
+        const height = item.height || maxHeight * (0.55 + hash01(item.id, 3) * 0.45);
+        const tone = item.tone ? ' tone-' + item.tone : '';
+        return {
+          coords,
+          north,
+          height,
+          zone,
+          tone,
+          badge,
+          kind: item.kind || 'building',
+        };
+      })
+      .sort((a, b) => b.north - a.north); // north first, south last on top
+
+    blocks.forEach((block) => {
+      const { coords, height } = block;
+
+      // a flat feature (pool, lawn, court) is painted once, with no walls and no height
+      if (block.kind && block.kind !== 'building') {
+        const flat = coords.map((p) => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
+        layer.appendChild(el('polygon', { points: flat, class: 'fp-flat fp-flat-' + block.kind }));
+        return;
+      }
+
+      // 1. a soft shadow on the ground, offset down-right: grounds the block
+      const shadow = coords.map((p) => (p.x + 5).toFixed(1) + ',' + (p.y + 5).toFixed(1)).join(' ');
+      layer.appendChild(el('polygon', { points: shadow, class: 'fp-shadow' }));
+
+      // 2. the walls
+      for (let i = 0; i < coords.length; i += 1) {
+        const p1 = coords[i];
+        const p2 = coords[(i + 1) % coords.length];
+        const d =
+          'M' + p1.x.toFixed(1) + ' ' + p1.y.toFixed(1) +
+          'L' + p2.x.toFixed(1) + ' ' + p2.y.toFixed(1) +
+          'L' + p2.x.toFixed(1) + ' ' + (p2.y - height).toFixed(1) +
+          'L' + p1.x.toFixed(1) + ' ' + (p1.y - height).toFixed(1) + 'Z';
+        const facing = p2.x < p1.x ? 'fp-wall-dark' : 'fp-wall';
+        layer.appendChild(el('path', { d, class: facing + block.tone }));
+      }
+      const roof = coords.map((p) => p.x.toFixed(1) + ',' + (p.y - height).toFixed(1)).join(' ');
+      layer.appendChild(el('polygon', { points: roof, class: 'fp-roof' + block.tone }));
+
+      // 3. a parapet: the roof inset towards its own centre
+      const cx = coords.reduce((a, p) => a + p.x, 0) / coords.length;
+      const cy = coords.reduce((a, p) => a + p.y, 0) / coords.length;
+      const inner = coords
+        .map(
+          (p) =>
+            (cx + (p.x - cx) * 0.82).toFixed(1) +
+            ',' +
+            (cy + (p.y - cy) * 0.82 - height).toFixed(1),
+        )
+        .join(' ');
+      layer.appendChild(el('polygon', { points: inner, class: 'fp-roof-inner' + block.tone }));
+
+      // 4. the building's letter, on the roof it actually belongs to
+      if (block.badge) {
+        const code = el('text', {
+          x: cx.toFixed(1),
+          y: (cy - height + 4).toFixed(1),
+          class: 'roof-code',
+        });
+        code.textContent = block.badge;
+        layer.appendChild(code);
+      }
+    });
+  }
+
+  // -- places and walkways -------------------------------------------------
+  private drawGraph(): void {
+    const edgeLayer = layerOf('layer-edges');
+    const nodeLayer = layerOf('layer-nodes');
+    if (!edgeLayer || !nodeLayer || !this.graph) return;
+
+    edgeLayer.innerHTML = '';
+    this.graph.edges.forEach((edge: GraphEdge) => {
+      const a = this.nodes.get(edge.u);
+      const b = this.nodes.get(edge.v);
+      if (!a || !b) return;
+      const d = this.edgeShape(edge, a, b);
+      edgeLayer.appendChild(el('path', { d, class: 'edge-casing' }));
+      const line = el('path', { d, class: 'edge' });
+      const tip = el('title', {});
+      tip.textContent =
+        edge.id + ' · ' + Math.round(edge.metres) + ' m' +
+        (edge.stairs ? ' · steps' : '') + (edge.covered ? ' · covered' : '');
+      line.appendChild(tip);
+      edgeLayer.appendChild(line);
+      if (edge.stairs) this.drawStairs(edgeLayer, edge, a, b);
+    });
+
+    nodeLayer.innerHTML = '';
+    this.serviceGroups = [];
+    this.nodes.forEach((node) => {
+      // a waypoint is a junction, not a place: the end point of a link, never drawn
+      if (node.kind === 'waypoint') return;
+      // doorways are off until asked for
+      if (node.kind === 'entrance' && !this.showDoors) return;
+      const p = this.project(node.lat, node.lng);
+      const g = el('g', { class: 'node ' + node.kind }) as SVGGElement;
+      if (node.kind === 'service') {
+        const cat = categoryOf(node);
+        g.classList.add('cat-' + cat);
+        this.serviceGroups.push({ el: g, cat });
+        g.appendChild(el('circle', { cx: p.x, cy: p.y, r: 7 }));
+      } else {
+        const size = node.kind === 'entrance' ? 13 : node.kind === 'place' ? 14 : 18;
+        // a shadowed face under the block: the cheapest honest nod to 2.5D
+        if (node.kind !== 'entrance' && node.kind !== 'place') {
+          g.appendChild(
+            el('rect', {
+              x: p.x - size / 2 + 3.5,
+              y: p.y - size / 2 + 3.5,
+              width: size,
+              height: size,
+              rx: 3,
+              class: 'node-shadow',
+            }),
+          );
+          for (let i = 0; i < 3; i += 1) {
+            const angle = hash01(node.id, i) * Math.PI * 2;
+            const radius = 13 + hash01(node.id, i + 10) * 11;
+            nodeLayer.appendChild(
+              el('circle', {
+                cx: p.x + Math.cos(angle) * radius,
+                cy: p.y + Math.sin(angle) * radius,
+                r: 2 + hash01(node.id, i + 20) * 1.6,
+                class: 'tree',
+              }),
+            );
+          }
+        }
+        g.appendChild(
+          el('rect', { x: p.x - size / 2, y: p.y - size / 2, width: size, height: size, rx: 3 }),
+        );
+        if (node.kind === 'building') {
+          const code = el('text', { x: p.x, y: p.y + 3.1, class: 'node-code' });
+          code.textContent = shortCode(node.name);
+          g.appendChild(code);
+        }
+      }
+      const tip = el('title', {});
+      tip.textContent = node.name + (node.service ? ' · ' + node.service : '');
+      g.appendChild(tip);
+
+      if (node.kind === 'building') {
+        const label = el('text', { x: p.x + 11, y: p.y + 4, class: 'node-label building-label' });
+        label.textContent = node.name.length > 26 ? node.name.slice(0, 25) + '…' : node.name;
+        label.style.display = 'none';
+        nodeLayer.appendChild(label);
+      }
+
+      g.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        this.opts.onPlaceClick(node);
+      });
+      g.addEventListener('mouseenter', () => this.opts.onTip(node.name + (node.floor ? ' · ' + node.floor : '')));
+      g.addEventListener('mouseleave', () => this.opts.onTip(null));
+      nodeLayer.appendChild(g);
+    });
+
+    this.applyFilters();
+    this.drawFootprints();
+    this.applyView();
+  }
+
+  private edgeShape(edge: GraphEdge, a: GraphNode, b: GraphNode): string {
+    const points =
+      edge.path && edge.path.length >= 2
+        ? edge.path.map(([lat, lng]) => this.project(lat, lng))
+        : [this.project(a.lat, a.lng), this.project(b.lat, b.lng)];
+    return points.map((p, i) => (i ? 'L' : 'M') + p.x.toFixed(2) + ' ' + p.y.toFixed(2)).join(' ');
+  }
+
+  /* A flight of steps is drawn as rungs instead of a plain line, because "walk 40 m
+     and you will meet steps" is different advice from "walk 40 m". Spacing is in
+     screen pixels so the shape survives zooming. */
+  private drawStairs(layer: SVGGElement, edge: GraphEdge, a: GraphNode, b: GraphNode): void {
+    const points =
+      edge.path && edge.path.length >= 2
+        ? edge.path.map(([lat, lng]) => this.project(lat, lng))
+        : [this.project(a.lat, a.lng), this.project(b.lat, b.lng)];
+    const spacing = 5.5;
+    const half = 3.4;
+    for (let i = 1; i < points.length; i += 1) {
+      const p0 = points[i - 1];
+      const p1 = points[i];
+      const dx = p1.x - p0.x;
+      const dy = p1.y - p0.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len;
+      const ny = dx / len;
+      for (let d = spacing / 2; d < len; d += spacing) {
+        const x = p0.x + (dx * d) / len;
+        const y = p0.y + (dy * d) / len;
+        layer.appendChild(
+          el('line', {
+            x1: (x - nx * half).toFixed(1),
+            y1: (y - ny * half).toFixed(1),
+            x2: (x + nx * half).toFixed(1),
+            y2: (y + ny * half).toFixed(1),
+            class: 'edge-stairs',
+          }),
+        );
+      }
+    }
+  }
+
+  private applyFilters(): void {
+    this.serviceGroups.forEach(({ el: group, cat }) => {
+      group.classList.toggle('dim', this.hidden.has(cat));
+    });
+  }
+
+  // -- route ---------------------------------------------------------------
+  private drawRoute(route: RoutePayload | null): void {
+    const layer = layerOf('layer-route');
+    if (!layer) return;
+    layer.innerHTML = '';
+    const navigating = Boolean(route && route.path && route.path.length >= 2);
+    // Navigating shows the route and nothing else: revealing all 343 walkway links as
+    // well would bury the one line the user has to follow.
+    this.svg.classList.toggle('no-links', !this.showLinks);
+    if (!navigating) return;
+
+    const shaped: Point[] = [];
+    (route as RoutePayload).segments.forEach((seg) => {
+      if (seg.path && seg.path.length >= 2) {
+        seg.path.forEach(([lat, lng]) => shaped.push(this.project(lat, lng)));
+      }
+    });
+    const points = (route as RoutePayload).path.map((p) => this.project(p.lat, p.lng));
+    const drawPoints = shaped.length >= 2 ? shaped : points;
+    const d = drawPoints
+      .map((p, i) => (i ? 'L' : 'M') + p.x.toFixed(2) + ' ' + p.y.toFixed(2))
+      .join(' ');
+    layer.appendChild(el('path', { d, class: 'route-casing' }));
+    layer.appendChild(el('path', { d, class: 'route-line' }));
+
+    (route as RoutePayload).path.forEach((p, i) => {
+      const xy = points[i];
+      layer.appendChild(el('circle', { cx: xy.x, cy: xy.y, r: i === 0 ? 9 : 6, class: 'route-dot' }));
+      layer.appendChild(el('circle', { cx: xy.x, cy: xy.y, r: i === 0 ? 4 : 3, class: 'route-pin' }));
+      if (i === 0 || i === (route as RoutePayload).path.length - 1) {
+        const label = el('text', { x: xy.x + 12, y: xy.y - 10, class: 'node-label route-label' });
+        label.textContent = (i === 0 ? 'START · ' : 'GOAL · ') + p.name;
+        layer.appendChild(label);
+      }
+    });
+    this.fitTo(points);
+  }
+
+  private fitTo(points: Point[]): void {
+    if (!points.length) return;
+    const xs = points.map((p) => p.x);
+    const ys = points.map((p) => p.y);
+    const pad = 70;
+    const x = Math.min(...xs) - pad;
+    const y = Math.min(...ys) - pad;
+    const w = Math.max(Math.max(...xs) + pad - x, 200);
+    const h = Math.max(Math.max(...ys) + pad - y, 160);
+    this.view = { x, y, w, h };
+    this.applyView();
+  }
+
+  // -- interaction ---------------------------------------------------------
+  private bindInteractions(): void {
+    const svg = this.svg;
+
+    const onMouseDown = (ev: MouseEvent) => {
+      this.drag = { x: ev.clientX, y: ev.clientY, vx: this.view.x, vy: this.view.y };
+      svg.classList.add('dragging');
+    };
+    const onMouseUp = () => {
+      this.drag = null;
+      svg.classList.remove('dragging');
+    };
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!this.drag) return;
+      const rect = svg.getBoundingClientRect();
+      const scale = this.view.w / rect.width;
+      this.view.x = this.drag.vx - (ev.clientX - this.drag.x) * scale;
+      this.view.y = this.drag.vy - (ev.clientY - this.drag.y) * scale;
+      this.applyView();
+    };
+    const onWheel = (ev: WheelEvent) => {
+      ev.preventDefault();
+      const rect = svg.getBoundingClientRect();
+      const cx = this.view.x + (ev.clientX - rect.left) * (this.view.w / rect.width);
+      const cy = this.view.y + (ev.clientY - rect.top) * (this.view.h / rect.height);
+      this.zoom(ev.deltaY > 0 ? 1.12 : 0.89, cx, cy);
+    };
+
+    svg.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('mousemove', onMouseMove);
+    svg.addEventListener('wheel', onWheel, { passive: false });
+
+    this.teardown.push(() => {
+      svg.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('mousemove', onMouseMove);
+      svg.removeEventListener('wheel', onWheel);
+    });
+  }
+}
+
+// -- web-mercator helpers, for the basemap ---------------------------------
+function tileXOf(lng: number, z: number): number {
+  return ((lng + 180) / 360) * 2 ** z;
+}
+
+function tileYOf(lat: number, z: number): number {
+  const rad = (lat * Math.PI) / 180;
+  return ((1 - Math.asinh(Math.tan(rad)) / Math.PI) / 2) * 2 ** z;
+}
+
+function latAtTileY(y: number, z: number): number {
+  return (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / 2 ** z))) * 180) / Math.PI;
+}
+
+function lngAtTileX(x: number, z: number): number {
+  return (x / 2 ** z) * 360 - 180;
+}

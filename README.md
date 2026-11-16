@@ -15,7 +15,17 @@ python -m campus_nav.web --open      # web app  ->  http://127.0.0.1:8000
 python -m campus_nav.cli --demo      # the same three turns in a terminal
 ```
 
-Python 3.10+. The standard library only — nothing to install, no build step, no network.
+Python 3.10+ to run it — the standard library only, nothing to install, no network.
+The interface ships as a committed bundle, so no build step is needed to demo it.
+
+To change the interface (Node 18+), the source lives in `web/` and builds into
+`campus_nav/static/`:
+
+```bash
+cd web && npm install
+npm run build      # writes campus_nav/static/ — commit the result
+npm run dev        # hot reload, proxying /api to the Python app on :8000
+```
 
 Without an API key the app runs on its grammar parser and template replies, which is the
 mode to fall back on if the demo Wi-Fi fails. With a key in `.env` (see `.env.example`) the
@@ -79,7 +89,8 @@ than inventing a route. To change the map: edit a GeoJSON in `data/authored/`, r
 | Path | What |
 |---|---|
 | `campus_nav/` | the application: graph, A*/UCS search, dialogue, NLU, knowledge base, web server |
-| `campus_nav/static/` | the interface — HTML, CSS, one JavaScript file, no framework |
+| `web/` | the interface source: React 18 + TypeScript, built by Vite |
+| `campus_nav/static/` | **generated** — the built interface the server serves |
 | `tools/build.py` | the only tool: build, audit, gaps, name report |
 | `data/raw_data/` | what Overpass and the PolyU sites published, untouched |
 | `data/authored/` | the GeoJSON you draw and edit |
