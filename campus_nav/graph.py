@@ -210,18 +210,14 @@ class CampusGraph:
         self,
         closed_edges: set[str] | None = None,
         closed_nodes: set[str] | None = None,
+        *, avoid_stairs: bool = False,
     ) -> list[Edge]:
-        """Filter first, then search -- exactly as the plan specifies.
-
-        The only constraint a link can carry is whether it is currently open. A
-        closure is reported by the user ("the link between C and D is closed"), so
-        it is a runtime fact rather than an attribute we had to invent.
-        """
+        """Exclude closures and, when requested, all links marked as stairs."""
         closed_edges = closed_edges or set()
         closed_nodes = closed_nodes or set()
         out = []
         for e in self.edges:
-            if not e.open or e.id in closed_edges:
+            if not e.open or e.id in closed_edges or (avoid_stairs and e.stairs):
                 continue
             if (e.u in closed_nodes) or (e.v in closed_nodes):
                 continue
@@ -232,9 +228,10 @@ class CampusGraph:
         self,
         closed_edges: set[str] | None = None,
         closed_nodes: set[str] | None = None,
+        *, avoid_stairs: bool = False,
     ) -> dict[str, list[tuple[str, float, Edge]]]:
         adj: dict[str, list[tuple[str, float, Edge]]] = {n: [] for n in self.nodes}
-        for e in self.usable_edges(closed_edges, closed_nodes):
+        for e in self.usable_edges(closed_edges, closed_nodes, avoid_stairs=avoid_stairs):
             adj[e.u].append((e.v, e.metres, e))
             adj[e.v].append((e.u, e.metres, e))
         return adj
@@ -291,10 +288,8 @@ class CampusGraph:
                                   / max(len(needle), len(cand)))
             if any(not has_words(token, cand) for token in short_tokens):
                 return 0
-            for word in needle_words:
-                if has_words(word, cand):
-                    return 40 + min(len(word), 25)
-            return 0
+            return max((40 + min(len(word), 25) for word in needle_words
+                        if has_words(word, cand)), default=0)
 
         scored: list[tuple[int, Node]] = []
         for node in self.nodes.values():
@@ -304,6 +299,10 @@ class CampusGraph:
                 continue
             head, tail = name_parts(node.name)
             best = max(score(node.id.lower()), score(head))
+            # The bracket after a block code names the building itself. In a
+            # facility label it only gives an address, e.g. Toilet (Block V).
+            if tail and node.kind == "place" and re.fullmatch(r"(?:block|wing|core) [a-z]+", head):
+                best = max(best, score(tail))
             if node.name_zh:
                 best = max(best, score(node.name_zh.lower()))
             if needle == node.name.lower():
@@ -318,7 +317,9 @@ class CampusGraph:
                     best = 20 + min(19, bracketed // 4)
             if best > 0:
                 scored.append((best, node))
-        scored.sort(key=lambda t: (-t[0], t[1].name))
+        # A shared name at equal confidence (e.g. 圖書館) should prefer
+        # the named place over a service situated inside that place.
+        scored.sort(key=lambda t: (-t[0], t[1].kind == "service", t[1].name))
         return scored
 
     def summary(self) -> str:

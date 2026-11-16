@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { RotateCcw, Send } from 'lucide-react';
 import type { ChatMessage } from '../types';
 import { AvatarDock, type AvatarState } from './AvatarDock';
@@ -14,6 +14,13 @@ export interface ChatPanelProps {
   micAvailable: boolean;
   micRecording: boolean;
   hint: string;
+  micLabel: string;
+  languageLocked: boolean;
+  canReplay: boolean;
+  busy: boolean;
+  sendBlocked: boolean;
+  editor: ReactNode;
+  onReplay(): void;
   /** Increments when something outside the panel wants the composer focused. */
   focusSignal: number;
   /** The message whose route list is live on the map, and which option. */
@@ -46,7 +53,7 @@ export function ChatPanel(props: ChatPanelProps) {
     <section className={PANEL}>
       <div className={PANEL_HEAD}>
         <h2 className={PANEL_TITLE}>Chat</h2>
-        <button type="button" onClick={props.onReset} className={BTN_GHOST + ' inline-flex items-center gap-1.5'}>
+        <button id="reset" type="button" disabled={props.busy} onClick={props.onReset} className={BTN_GHOST + ' inline-flex items-center gap-1.5'}>
           <RotateCcw size={13} aria-hidden="true" />
           Reset
         </button>
@@ -71,21 +78,26 @@ export function ChatPanel(props: ChatPanelProps) {
         micAvailable={props.micAvailable}
         micRecording={props.micRecording}
         hint={props.hint}
+        micLabel={props.micLabel}
+        languageLocked={props.languageLocked}
+        canReplay={props.canReplay}
+        onReplay={props.onReplay}
         onMic={props.onMic}
         onToggleVoice={props.onToggleVoice}
         onLangChange={props.onLangChange}
       />
 
+      {props.editor}
       <form
         className="flex gap-2 px-4 py-3"
         data-composer-form
         onSubmit={(event) => {
           event.preventDefault();
-          props.onSend(props.draft);
+          if (!props.sendBlocked) props.onSend(props.draft);
         }}
       >
         <input
-          ref={composer}
+          id="input" ref={composer}
           type="text"
           data-composer
           autoComplete="off"
@@ -95,8 +107,8 @@ export function ChatPanel(props: ChatPanelProps) {
           className="min-w-0 flex-1 rounded-[11px] border border-line bg-panel-soft px-[13px] py-[11px] text-sm text-ink placeholder:text-muted/80 focus:border-brand focus:outline-none"
         />
         <button
-          type="submit"
-          className="inline-flex cursor-pointer items-center gap-1.5 rounded-[11px] bg-brand px-4 py-[11px] text-[13px] font-medium text-onaccent transition hover:brightness-110"
+          type="submit" id="send" disabled={props.sendBlocked}
+          className="inline-flex cursor-pointer items-center gap-1.5 rounded-[11px] bg-brand px-4 py-[11px] text-[13px] font-medium text-onaccent transition hover:brightness-110 disabled:opacity-50"
         >
           <Send size={14} aria-hidden="true" />
           Send

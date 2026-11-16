@@ -16,11 +16,13 @@ import re
 from dataclasses import dataclass, field
 
 from .config import RAW_DIR
-from .graph import CampusGraph, Node
+from .facility_speech import FacilityResult, requested_day
+from .graph import STOPWORDS, CampusGraph, Node
 from .kb import KnowledgeBase, hours_summary, open_state, parse_slots, today_hours
 from .llm import OpenRouterClient
 from .narrate import Facts, Narration, Narrator
-from .nlu import REOPEN, Slots, parse
+from .nlu import (REOPEN, Slots, map_spelling, names_destination, parse, parse_with_grammar,
+                  refers_to_last_distance, stair_request)
 from .places import (
     SERVICE_WORDS,
     canonical_category,
@@ -28,6 +30,15 @@ from .places import (
     human_category,
 )
 from .search import RouteResult, compare, search
+
+
+@dataclass
+class RouteClarification:
+    role: str
+    query: str = ""
+    candidates: tuple[str, ...] = ()
+    known_place: str = ""
+
 
 @dataclass
 class Reply:
@@ -47,6 +58,8 @@ class Reply:
     # reading the printed table aloud is unlistenable and guessing here would let the
     # audio drift from the screen.
     spoken: str = ""
+    clarification: RouteClarification | None = None
+    facility_result: FacilityResult | None = None
 
 
 @dataclass
@@ -57,12 +70,8 @@ class SessionState:
     closed_nodes: set[str] = field(default_factory=set)
     last_route: RouteResult | None = None
     pending: str | None = None  # "origin" | "destination" | None
-
-    def remember(self, route: RouteResult) -> None:
-        if route.reachable and route.path:
-            self.origin = route.path[0]
-            self.destination = route.path[-1]
-            self.last_route = route
+    avoid_stairs: bool = False
+    last_facilities: FacilityResult | None = None
 
 
 def fmt_route(graph: CampusGraph, route: RouteResult) -> str:
@@ -113,8 +122,7 @@ def fmt_route(graph: CampusGraph, route: RouteResult) -> str:
     return "\n".join(lines)
 
 
-# Words that mean "can I get there without using stairs?" -- a question this map
-# deliberately cannot answer, so it must answer it honestly rather than ignore it.
+# General accessibility questions beyond the mapped outdoor stair filter.
 _STEP_FREE = re.compile(
     r"\b(stairs?|stairway|steps|step[- ]free|wheelchair|barrier[- ]free|"
     r"lift|lifts|elevator|escalator|accessible route|trolley)\b",
@@ -147,8 +155,65 @@ class Dialogue:
         return self._knowledge
 
     # -- public ------------------------------------------------------------
-    def handle(self, text: str) -> Reply:
-        slots = parse(text, self.graph, self.client)
+    def _interpret_pending_place(self, text: str, slots: Slots) -> None:
+        """A bare place name answers the last question about a missing endpoint."""
+        if (self.state.pending and text and slots.intent in ("route", "out_of_scope")
+                and (slots.avoid_stairs is None or slots.mentions_places or self._preferred_matches(text))
+                and not slots.origin_text and not names_destination(text, self.graph)):
+            if not text.rstrip().endswith(("?", "？")) or self._preferred_matches(text):
+                if self.state.pending == "origin":
+                    slots.origin_text, slots.destination_text = text, ""
+                else:
+                    slots.destination_text = text
+                slots.intent = "route"
+
+    def draft_slots(self, text: str) -> Slots:
+        """Preview a voice draft without running a search or changing the dialogue."""
+        slots = parse_with_grammar(text, self.graph)
+        if slots.intent == "route" and slots.facility_choice is not None:
+            last = self.state.last_facilities
+            index = slots.facility_choice
+            if last and 0 <= index < len(last.rows):
+                destination = last.rows[index].get("node_id")
+                if destination in self.graph.nodes:
+                    slots.destination_text = destination
+                    slots.origin_text = last.route_origin
+                    slots.facility_choice = None
+            return slots
+        self._interpret_pending_place(stair_request(text)[0], slots)
+        return slots
+
+    def draft_endpoints(self, text: str) -> dict | None:
+        slots = self.draft_slots(text)
+        if slots.intent not in ("route", "distance") or slots.facility_choice is not None:
+            return None
+        inherit = slots.mentions_places or slots.avoid_stairs is not None or refers_to_last_distance(text)
+        endpoints = {}
+        for role, phrase in (("origin", slots.origin_text), ("destination", slots.destination_text)):
+            matches = self._preferred_matches(phrase) if phrase else []
+            node_id = matches[0].id if len(matches) == 1 else None
+            if not phrase and inherit:
+                node_id = getattr(self.state, role)
+            endpoints[role] = {"text": phrase, "id": node_id}
+        return endpoints
+
+    def handle(self, text: str, *, endpoints: dict | None = None) -> Reply:
+        if endpoints is None:
+            slots = parse(text, self.graph, self.client)
+            self._interpret_pending_place(stair_request(text)[0], slots)
+        else:
+            # The selections replace only the place slots. Keep the original
+            # transcript's distance intent and restrictions (e.g. no stairs).
+            slots = self.draft_slots(text)
+            if slots.intent not in ("route", "distance") or slots.facility_choice is not None:
+                raise ValueError("These endpoints need a route question.")
+            if not isinstance(endpoints, dict) or not endpoints:
+                raise ValueError("Choose a place on the campus map.")
+            for role, node_id in endpoints.items():
+                node = self.graph.nodes.get(node_id) if isinstance(node_id, str) else None
+                if role not in ("origin", "destination") or not node or node.kind == "waypoint":
+                    raise ValueError("Choose a named place on the campus map.")
+                setattr(slots, role + "_text", node_id)
         intent = slots.intent
 
         if intent == "help":
@@ -157,28 +222,17 @@ class Dialogue:
             self.state = SessionState()
             return Reply("Cleared. Where would you like to go?")
 
-        if intent == "green_query":
-            return self._facilities(slots)
-        if intent == "facility_query":
-            return self._facilities(slots)
-        if intent == "hours_query":
-            return self._hours(slots)
+        if slots.facility_choice is not None:
+            return self._facility_choice(slots)
+        if intent in ("green_query", "facility_query", "hours_query"):
+            reply = self._hours(slots) if intent == "hours_query" else self._facilities(slots)
+            if reply.facility_result:
+                self.state.last_facilities = reply.facility_result
+            return reply
+        self.state.last_facilities = None
 
-        # If the previous turn left a question open (e.g. "where are you starting
-        # from?"), a bare place name is the answer to that question -- but only a bare
-        # one. A sentence that names both ends itself is a new request, and swallowing
-        # it as the missing half once produced "Block Y -> Block VA" from
-        # "from Block VA to Core U".
-        answering = self.state.pending and not (slots.origin_text and slots.destination_text)
-        if answering:
-            hits = self._preferred_matches(text)
-            if len(hits) == 1:
-                if self.state.pending == "origin":
-                    slots.origin_text, slots.destination_text = text, ""
-                else:
-                    slots.destination_text, slots.origin_text = text, ""
-                intent = "route"
-                self.state.pending = None
+        if slots.avoid_stairs is not None:
+            self.state.avoid_stairs = slots.avoid_stairs
 
         if intent == "close" or slots.closed_text:
             closed_note = self._close(slots.closed_text)
@@ -191,6 +245,11 @@ class Dialogue:
             return self._route_reply(slots, prefix=closed_note)
 
         if intent in ("route", "distance"):
+            if intent == "distance" and not slots.mentions_places and not refers_to_last_distance(text):
+                # Neither place in the new question was understood. Ask for both
+                # again rather than quietly measuring the previous pair.
+                self.state.origin = self.state.destination = None
+                self.state.last_route = None
             return self._route_reply(slots)
 
         # Somebody will ask about stairs, lifts or wheelchair access at Open Day. Two
@@ -232,25 +291,24 @@ class Dialogue:
         "library" matches both Pao Yue-kong Library and the four facilities in it;
         "battery bin" should pick the facility. SERVICE_WORDS decides which.
         """
+        if text in self.graph.nodes and self.graph.node(text).kind != "waypoint":
+            return [self.graph.node(text)]
+        text = map_spelling(text)
         scored = self.graph.resolve_scored(text)
         if not scored:
             return []
-        self._scores = {node.id: score for score, node in scored}
+        scores = {node.id: score for score, node in scored}
         matches = [node for _, node in scored]
-        # A child is not an alternative to its own parent: ""the library"" must not
-        # offer ""Entrance (Pao Yue-kong Library)"" as a second choice just because the
-        # building's name is part of the child's grouped name.
-        ids = {n.id for n in matches}
-        grouped = [n for n in matches if not (n.parent and n.parent in ids)]
-        if grouped:
-            matches = grouped
-        # An exact name match wins outright. "Core A" also matches the building whose
-        # address alias is "Core A (G/F)", and asking the user which of the two they
-        # meant is a dead end -- they typed the name of the first one.
         needle = " ".join((text or "").lower().split())
         exact = [n for n in matches if n.name.lower() == needle]
         if exact:
             return exact
+        # When the user names the building, offer it once rather than listing
+        # every door and facility whose label also contains its name.
+        ids = {n.id for n in matches}
+        grouped = [n for n in matches if not (n.parent and n.parent in ids)]
+        if grouped:
+            matches = grouped
         # "Block L" is a prefix of "Block L (Pao Yue-Kong Library)" but only of that
         # one -- "Block M" and "Block N" share the word "block", not the phrase.
         prefix = [
@@ -267,42 +325,14 @@ class Dialogue:
         # Keep only the best-scoring band. A weaker match is not an alternative to the
         # phrase, it is a worse answer: "library" must not also offer "Block M (Li Ka
         # Shing Tower)" merely because a word landed in its brackets.
-        top = max(self._scores.get(n.id, 0) for n in matches)
-        matches = [n for n in matches if self._scores.get(n.id, 0) == top]
+        top = max(scores[n.id] for n in matches)
+        matches = [n for n in matches if scores[n.id] == top]
         # A plain name beats a qualified one at the same score: "Pao Yue-Kong Library"
         # over "Pao Yue-kong Library (LIB)".
+        if top < 60 and len(set(re.findall(r"\w+", needle)) - STOPWORDS) > 1:
+            return matches
         plain = [n for n in matches if "(" not in n.name]
         return plain or matches
-
-    def _resolve_or_ask(self, slots: Slots, previous: str | None, role: str) -> tuple[str | None, Reply | None]:
-        """Resolve a place mention, or produce the clarifying question."""
-        text = slots.origin_text if role == "origin" else slots.destination_text
-        if not text:
-            if previous:
-                return previous, None
-            self.state.pending = role
-            other = "destination" if role == "origin" else "origin"
-            known = self.graph.node(previous).name if previous else None
-            if known and role == "origin":
-                return None, Reply(
-                    f"Where are you starting from? I will take you to {known}."
-                )
-            if known and role == "destination":
-                return None, Reply(f"Where would you like to go from {known}?")
-            return None, Reply(f"Where is your {role}? (e.g. \"the entrance\", \"the library\")")
-
-        preferred = self._preferred_matches(text)
-        if not preferred:
-            self.state.pending = role
-            sample = ", ".join(n.name for n in list(self.graph.nodes.values())[:5])
-            return None, Reply(
-                f"I do not know \"{text}\". Known places include: {sample}. "
-                f"Which {role} do you mean?"
-            )
-        if len(preferred) > 1:
-            names = ", ".join(n.name for n in preferred[:4])
-            return None, Reply(f"\"{text}\" could be several places: {names}. Which one?")
-        return preferred[0].id, None
 
     def _close(self, closed_text: str) -> str:
         """Close something the user says is closed: a named link, or a whole place.
@@ -363,23 +393,44 @@ class Dialogue:
         Both endpoints are absorbed before either is questioned, so a destination
         given in turn 1 survives a clarifying question about the origin.
         """
+        unresolved = []
         for role, text in (("origin", slots.origin_text), ("destination", slots.destination_text)):
             if not text:
                 continue
-            preferred = self._preferred_matches(text)
-            if len(preferred) == 1:
-                setattr(self.state, role, preferred[0].id)
-                continue
-            self.state.pending = role
-            if len(preferred) > 1:
-                names = ", ".join(n.name for n in preferred[:4])
-                return Reply(f"\"{text}\" could be several places: {names}. Which one?")
-            sample = ", ".join(n.name for n in list(self.graph.nodes.values())[:5])
-            return Reply(
-                f"I do not know \"{text}\". Known places include: {sample}. "
-                f"Which {role} do you mean?"
-            )
+            matches = self._preferred_matches(text)
+            if len(matches) == 1:
+                setattr(self.state, role, matches[0].id)
+            else:
+                setattr(self.state, role, None)
+                # Put the closest names in the short spoken list. "Jockey of
+                # Innovation" should include the tower before unrelated Jockey venues.
+                words = set(re.findall(r"\w+", text.casefold())) - STOPWORDS
+                matches.sort(key=lambda n: len(words.intersection(re.findall(r"\w+", n.name.casefold()))),
+                             reverse=True)
+                names = tuple(dict.fromkeys(node.name for node in matches))
+                unresolved.append((role, text, names[:4]))
+        if unresolved:
+            self.state.last_route = None
+            return self._ask_place(*unresolved[0])
         return None
+
+    def _ask_place(self, role: str, query: str = "", candidates: tuple[str, ...] = ()) -> Reply:
+        self.state.pending = role
+        known_id = self.state.destination if role == "origin" else self.state.origin
+        known = self.graph.node(known_id).name if known_id else ""
+        clarification = RouteClarification(role, query, candidates, known)
+        if candidates:
+            prompt = f'"{query}" could be several places: {", ".join(candidates)}. Which one?'
+        elif query:
+            prompt = f'I do not know "{query}". Which {role} do you mean?'
+        elif role == "origin":
+            prompt = "Where are you starting from?"
+        else:
+            prompt = "Where would you like to go?"
+        if known:
+            other_role = "Destination" if role == "origin" else "Starting point"
+            prompt += f" {other_role}: {known}."
+        return Reply(prompt, clarification=clarification)
 
     def _indoor_text(self, node_id: str) -> str:
         """What to say when the destination is inside a building.
@@ -434,6 +485,7 @@ class Dialogue:
                 algorithm="astar",
                 closed_edges=closed_edges,
                 closed_nodes=blocked,
+                avoid_stairs=self.state.avoid_stairs,
             )
             if not candidate.reachable:
                 continue
@@ -441,6 +493,9 @@ class Dialogue:
                 best = candidate
         if best is not None:
             return best
+        if self.state.avoid_stairs:
+            # All actual entrances failed. The building centre is not another door.
+            return candidate
         # No door is reachable: report the building itself, so the reply still says
         # which closure is blocking the way rather than claiming the place vanished.
         return search(
@@ -493,33 +548,15 @@ class Dialogue:
 
     def _route_reply(self, slots: Slots, prefix: str = "") -> Reply:
         ask = self._absorb_places(slots)
+        if not ask and not self.state.destination:
+            ask = self._ask_place("destination")
+        if not ask and not self.state.origin:
+            ask = self._ask_place("origin")
         if ask:
-            return Reply((prefix + "\n" if prefix else "") + ask.text, slots=slots)
-        # Resolving the places is what may have left a note, so read it afterwards.
-
-        # Ask for whatever is still missing, naming the half we already know.
-        if not self.state.destination and not self.state.origin:
-            self.state.pending = "destination"
-            return Reply(
-                (prefix + "\n" if prefix else "")
-                + "Where would you like to go? For example \"from the entrance to the library\".",
-                slots=slots,
-            )
-        if not self.state.destination:
-            self.state.pending = "destination"
-            origin_name = self.graph.node(self.state.origin).name
-            return Reply(
-                (prefix + "\n" if prefix else "") + f"Where would you like to go from {origin_name}?",
-                slots=slots,
-            )
-        if not self.state.origin:
-            self.state.pending = "origin"
-            dest_name = self.graph.node(self.state.destination).name
-            return Reply(
-                (prefix + "\n" if prefix else "")
-                + f"Where are you starting from? I will take you to {dest_name}.",
-                slots=slots,
-            )
+            if prefix:
+                ask.text = prefix + "\n" + ask.text
+            ask.slots = slots
+            return ask
 
         self.state.pending = None
         origin, destination = self.state.origin, self.state.destination
@@ -546,8 +583,9 @@ class Dialogue:
         # an invented route.
         indoor_note = ""
         goal = destination
-        parent = self.graph.node(destination).parent
-        if parent and parent in self.graph.nodes:
+        place = self.graph.node(destination)
+        parent = place.parent
+        if place.kind != "entrance" and parent and parent in self.graph.nodes:
             indoor_note = self._indoor_text(destination)
             goal = parent
         routes = self._route_options(origin, goal)
@@ -555,12 +593,15 @@ class Dialogue:
 
         notes: list[str] = []
         constraints = []
+        if self.state.avoid_stairs:
+            constraints.append("avoid mapped stairs")
         if self.state.closed_edges:
             constraints.append(f"closed: {', '.join(sorted(self.state.closed_edges))}")
         if constraints:
             notes.append("Constraints: " + "; ".join(constraints))
 
         if not route.reachable:
+            self.state.last_route = None
             suggestions = self._suggestions(origin, destination)
             body = [
                 f"I cannot find a route from {self.graph.node(origin).name} to "
@@ -592,14 +633,18 @@ class Dialogue:
                     f"\nCompared with the previous route ({previous_total:.0f} m): "
                     f"{sign}{delta:.0f} m."
                 )
-        self.state.remember(route)
+        # Retain the requested destination for replanning. Its best door may
+        # change when a staircase is excluded or a passage closes.
+        self.state.last_route = route
         comparison = None
         if slots.intent == "distance":
             comparison = compare(
                 self.graph,
                 origin,
-                destination,
+                route.path[-1],
                 closed_edges=self.state.closed_edges,
+                closed_nodes=self._blocked(),
+                avoid_stairs=self.state.avoid_stairs,
             )
             notes.append(
                 f"A* expanded {comparison['astar']['expanded']} nodes vs UCS "
@@ -662,6 +707,8 @@ class Dialogue:
 
     def _describe_blocking(self) -> str:
         parts = []
+        if self.state.avoid_stairs:
+            parts.append("mapped stairs excluded")
         if self.state.closed_edges:
             parts.append(f"closed passages: {', '.join(sorted(self.state.closed_edges))}")
         if self.state.closed_nodes:
@@ -670,6 +717,8 @@ class Dialogue:
 
     def _suggestions(self, origin: str, destination: str) -> list[str]:
         """Priced ways out of a dead end. Every figure below is a real search."""
+        if self.state.avoid_stairs:
+            return ["try a different starting point or destination while avoiding mapped stairs"]
         out = []
         if self.state.closed_edges or self.state.closed_nodes:
             relaxed = search(
@@ -699,39 +748,64 @@ class Dialogue:
         for node in self.graph.nodes.values():
             if node.kind != "service":
                 continue
-            if wanted_items & set(node.accepts) or wanted_caps & set(node.accepts):
+            doc = self._facility_doc(node)
+            if raw == "accessible toilet" and slots.language == "zh":
+                # 'toilet' alone says nothing about wheelchair access.
+                accessible = doc and str(doc.fields.get("toilet_for_disabled")).lower() in {"true", "1", "yes", "y"}
+                if node.name.lower().startswith("accessible toilet") or accessible:
+                    matches.append(node)
+            elif raw == "recycling" and slots.language == "zh":
+                if node.source == "greenmap":
+                    matches.append(node)
+            elif wanted_items & set(node.accepts) or wanted_caps & set(node.accepts):
                 matches.append(node)
-            elif any(cap and cap in node.service.lower() for cap in wanted_caps):
+            elif (doc and (slots.language == "zh" or "defibrillator" in wanted_caps)
+                  and raw == doc.fields.get("category", "").lower()):
+                matches.append(node)
+            elif (node.service.lower() in wanted_caps if slots.language == "zh" else
+                  any(cap and cap in node.service.lower() for cap in wanted_caps)):
                 matches.append(node)
         return matches
 
+    def _facility_doc(self, node):
+        # Some authored POI node IDs use shortened source IDs. Exact official
+        # titles join those records without a fuzzy match to a different facility.
+        kb = self.knowledge
+        return (kb.for_node(node.id) or kb.by_title(node.name)) if kb else None
+
     @property
-    def _entrance(self) -> str | None:
+    def _default_reference(self) -> str | None:
+        """Use the published main entrance if mapped, otherwise the named Core P reference."""
+        for name in ("main entrance", "core p"):
+            for node in self.graph.nodes.values():
+                if node.name.casefold() == name:
+                    return node.id
         for node in self.graph.nodes.values():
             if node.kind == "entrance":
                 return node.id
         return None
 
-    def _distance_from(self, node: Node) -> float | None:
+    @property
+    def _distance_reference(self) -> str | None:
+        return (self.state.origin or (self.state.last_route.path[0] if self.state.last_route
+                and self.state.last_route.path else None) or self._default_reference)
+
+    def _distance_from(self, node: Node, reference: str | None = None) -> float | None:
         """Metres from where the user is standing.
 
-        With no origin in the conversation yet, distances are measured from the Main
-        Entrance, and the reply says so -- a number must never imply knowledge the
-        bot does not have.
+        With no user origin, name the map reference used to measure the distance.
         """
-        reference = (self.state.origin
-                     or (self.state.last_route.path[0] if self.state.last_route else None)
-                     or self._entrance)
+        reference = reference or self._distance_reference
         if not reference or reference not in self.graph.nodes:
             return None
         return self.graph.node(reference).distance_to(node)
 
-    def _card(self, node: Node) -> dict:
+    def _card(self, node: Node, reference: str | None = None) -> dict:
         """Structured facts about one place, for the reply and for a map or a card view."""
-        doc = self.knowledge.for_node(node.id) if self.knowledge else None
+        doc = self._facility_doc(node)
         hours = doc.hours if doc else {}
         is_open, why = open_state(hours) if hours else (None, "")
-        metres = self._distance_from(node)
+        metres = self._distance_from(node, reference)
         return {
             "node_id": node.id,
             "name": node.name,
@@ -745,6 +819,9 @@ class Dialogue:
             "open_now": is_open,
             "open_reason": why,
             "hours_summary": hours_summary(hours),
+            "opening_hours": hours,
+            "name_zh": doc.fields.get("name_zh", "") if doc else "",
+            "name_zh_cn": doc.fields.get("name_zh_cn", "") if doc else "",
             "address": (doc.fields.get("address") if doc else "") or "",
             "metres": round(metres) if metres is not None else None,
             "source": node.source,
@@ -767,18 +844,28 @@ class Dialogue:
             lines.append(
                 'Ask with an item or a facility, e.g. "where do I recycle batteries?", '
                 '"where is the nearest AED?", "is the canteen open?".')
-            return Reply("\n".join(lines), slots=slots)
+            return Reply("\n".join(lines), slots=slots, facility_result=FacilityResult("overview", counts=counts))
 
         matching = self._service_matches(slots)
         if not matching:
-            return self._dont_know(
+            reply = self._dont_know(
                 raw,
                 why=("no facility on the map accepts that item"
                      if not wants_service else "I have no such facility on the map"))
+            reply.slots = slots
+            reply.facility_result = FacilityResult("no_match", raw)
+            return reply
 
-        matching.sort(key=lambda n: (self._distance_from(n) is None,
-                                     self._distance_from(n) or 0.0))
-        cards = [self._card(n) for n in matching[:5]]
+        reference = self._distance_reference
+        if slots.facility_origin:
+            origins = self._preferred_matches(slots.facility_origin)
+            if len(origins) != 1:
+                return Reply(f'Which place do you mean by "{slots.facility_origin}"?', slots=slots,
+                             facility_result=FacilityResult("unknown_reference", slots.facility_origin))
+            reference = origins[0].id
+        if reference:
+            matching.sort(key=self.graph.node(reference).distance_to)
+        cards = [self._card(n, reference) for n in matching[:5]]
         label = human_category(canonical_category(raw)) if canonical_category(raw) else raw
         head = f"{len(matching)} place(s) for {label}:"
         lines = [head]
@@ -797,24 +884,140 @@ class Dialogue:
             lines.append("  - " + " - ".join(bits))
         if len(matching) > 5:
             lines.append(f"  ... and {len(matching) - 5} more.")
-        if self.state.origin is None:
-            lines.append("(Distances are measured from the Main Entrance until you tell me where you are.)")
+        if reference:
+            lines.append(f"(Straight-line distances are measured from {self.graph.node(reference).name}.)")
         lines.append("Name one and I will draw the walking route.")
         best = cards[0]
         where = ", ".join(p for p in (best["building"], best["floor"]) if p)
         spoken = f'The nearest one is {best["name"]}' + (f" at {where}" if where else "")
-        if best["metres"] is not None:
-            spoken += f", about {best['metres']} metres away"
+        if reference and best["metres"] is not None:
+            origin = self.graph.node(reference)
+            if (origin.lat, origin.lng) == (best["lat"], best["lng"]):
+                spoken += f", mapped at the same location as {origin.name}"
+            elif best["metres"] == 0:
+                spoken += f", less than one metre in a straight line from {origin.name}"
+            else:
+                spoken += f", about {best['metres']} metres in a straight line from {origin.name}"
         spoken += "."
         if len(matching) > 1:
             spoken += f" There are {len(matching)} on the map; the others are on screen."
-        return Reply("\n".join(lines), slots=slots, facilities=cards, spoken=spoken)
+        info = FacilityResult("list", raw, len(matching), reference or "", rows=cards,
+                              route_origin=reference if slots.facility_origin else "")
+        return Reply("\n".join(lines), slots=slots, facilities=cards, spoken=spoken, facility_result=info)
+
+    def _facility_choice(self, slots):
+        last = self.state.last_facilities
+        index = slots.facility_choice
+        if not last or index >= len(last.rows):
+            kind = "ask_category" if (index == 0 and "最近" in slots.subject and not (last and last.rows)) else "choice_missing"
+            return Reply("Which facility do you mean?", slots=slots,
+                         facility_result=FacilityResult(kind))
+        card = last.rows[index]
+        node_id = card.get("node_id")
+        if slots.intent == "route" and node_id in self.graph.nodes:
+            self.state.last_facilities = None
+            slots.origin_text = last.route_origin
+            slots.destination_text = node_id
+            if slots.avoid_stairs is not None:
+                self.state.avoid_stairs = slots.avoid_stairs
+            return self._route_reply(slots)
+        if slots.intent == "route":
+            return Reply("There is no mapped route to this facility.", slots=slots,
+                         facility_result=FacilityResult("no_route", rows=[card]))
+        kind = "hours" if slots.intent == "hours_query" or last.kind == "hours_options" else "selected"
+        info = FacilityResult(kind, last.subject, reference=last.reference, rows=[card],
+                              day=requested_day(slots.subject) or last.day, route_origin=last.route_origin)
+        self.state.last_facilities = info
+        return Reply(card.get("hours_summary") or card["name"], slots=slots, facility_result=info,
+                     facilities=[card] if node_id in self.graph.nodes else [])
+
+    def _document_card(self, doc):
+        # KB documents can publish a timetable even for places that have no
+        # routable node. Such a document can be listed, but has no map marker.
+        matches = [n for n in self.graph.nodes.values() if n.name.casefold() == doc.title.casefold()]
+        campus = [n for n in matches if n.source == "campus-map"]
+        matches = campus or matches
+        node = self.graph.nodes.get(doc.node_id) or (matches[0] if len(matches) == 1 else None)
+        card = self._card(node) if node else {"node_id": "", "name": doc.title}
+        card.update(name_zh=doc.fields.get("name_zh", ""), name_zh_cn=doc.fields.get("name_zh_cn", ""),
+                    opening_hours=doc.hours, hours_today=today_hours(doc.hours),
+                    hours_summary=hours_summary(doc.hours), open_now=open_state(doc.hours)[0])
+        return card
+
+    def _chinese_hours(self, slots):
+        query = slots.subject.casefold()
+        day = requested_day(query)
+        kb = self.knowledge
+        # An explicit official name takes priority over a generic category.
+        # Match both published Chinese names and spoken English names within a Chinese sentence.
+        docs = kb.docs if kb else []
+        named = []
+        for doc in docs:
+            if doc.source != "campus-map":
+                continue
+            names = [doc.title, doc.fields.get("name_zh", ""), doc.fields.get("name_zh_cn", "")]
+            size = max((len(n) for n in names if len(n) >= 2 and n.casefold() in query), default=0)
+            if size:
+                named.append((size, doc))
+        if named:
+            longest = max(size for size, _ in named)
+            records = [doc for size, doc in named if size == longest]
+        else:
+            # A generic question about a category may need a choice. Never
+            # substitute a similarly named clinic's timetable for an unknown name.
+            generic = re.sub(r"(?:星期|禮拜|礼拜|[週周])[一二三四五六日天]|公[眾众]假[期日]|明[天日]|聽日|听日|"
+                             r"今日|今天|現在|现在|而家|依家|[請请][問问]?|[邊边哪]一?[個个家間间]|"
+                             r"[開开]放[時間时间]*|[營营][業业][時間时间]*|[時时][間间]|[幾几][點点時时]|"
+                             r"什[么麼][時时]候|[開开關关][門门館馆]?|有冇|[仲還还]有|[了咗]?嗎|[呢呀啊吗的嘅？? ，,]", "", query)
+            generic_facility = slots.item and (not generic or generic == slots.facility_target.casefold()
+                                  or bool(re.fullmatch(r"[食飯饭膳餐][堂廳厅]|[診诊]所|洗手[間间]|[飲饮]水[機机]|[書书]店|[銀银]行|AED", generic, re.I)))
+            records = [doc for doc in docs if generic_facility and
+                       doc.fields.get("category", "").lower() == slots.item] if slots.item else []
+            if not records:
+                topic = generic or slots.item or slots.subject
+                places = self._preferred_matches(topic)
+                if len(places) == 1:
+                    known = self._card(places[0])
+                    info = FacilityResult("hours", rows=[known], day=day)
+                    return Reply(known["hours_summary"] or known["name"], slots=slots,
+                                 facility_result=info, facilities=[known])
+                if generic_facility:
+                    matches = self._service_matches(slots)
+                    if matches:
+                        cards = [self._card(n) for n in matches[:5]]
+                        info = FacilityResult("hours_options" if len(matches) > 1 else "hours",
+                                              slots.item, len(matches), rows=cards, day=day)
+                        return Reply(cards[0]["name"], slots=slots, facility_result=info, facilities=cards)
+                return Reply(f'No published record for "{topic}".', slots=slots,
+                             facility_result=FacilityResult("no_match", topic))
+
+        cards = [self._document_card(doc) for doc in records[:5]]
+        info = FacilityResult("hours" if len(records) == 1 else "hours_options", slots.item,
+                              len(records), rows=cards, day=day)
+        return Reply(cards[0]["hours_summary"] or cards[0]["name"], slots=slots,
+                     facilities=[c for c in cards if c.get("node_id")], facility_result=info)
 
     def _hours(self, slots: Slots) -> Reply:
         """Opening hours. Quotes the published table, or says there is not one."""
+        if slots.language == "zh":
+            return self._chinese_hours(slots)
         kb = self.knowledge
         if kb is None:
             return self._dont_know(slots.subject or slots.item, why="no knowledge base is loaded")
+
+        # A named clinic can be in the official directory even if its graph
+        # node's service field was left empty. Prefer its own published hours.
+        query = slots.subject.casefold()
+        named_docs = [doc for doc in kb.docs if doc.source == "campus-map" and doc.hours and
+                      len(doc.title) > 2 and doc.title.casefold() in query]
+        if len(named_docs) == 1:
+            card = self._document_card(named_docs[0])
+            _, why = open_state(named_docs[0].hours)
+            text = (f'{card["name"]}:\n  {card["hours_summary"]}\n  Right now: {why}.'
+                    "\nSource: PolyU campus map.")
+            spoken = f'{card["name"]}. Today: {card["hours_today"] or "no hours published"}. {why}.'
+            return Reply(text, slots=slots, facilities=[card] if card.get("node_id") else [],
+                         spoken=spoken, facility_result=FacilityResult("hours", rows=[card]))
 
         # 1) the question names something the map can resolve
         matching = self._service_matches(slots, slots.subject)
@@ -849,7 +1052,8 @@ class Dialogue:
                 f"{len(matching)} places match. The nearest is {first['name']}, "
                 f"today {first['hours_today'] or 'closed'}. The rest are on screen."
             )
-            return Reply("\n".join(lines), slots=slots, facilities=cards, spoken=spoken)
+            info = FacilityResult("hours_options", slots.item, len(matching), rows=cards)
+            return Reply("\n".join(lines), slots=slots, facilities=cards, spoken=spoken, facility_result=info)
 
         if len(matching) == 1:
             node = matching[0]
@@ -868,13 +1072,15 @@ class Dialogue:
                     f'{card["name"]}. Today: {card["hours_today"] or "closed"}. '
                     f'{reason[:1].upper()}{reason[1:]}.'
                 )
-                return Reply(text, slots=slots, facilities=[card], spoken=spoken)
+                return Reply(text, slots=slots, facilities=[card], spoken=spoken,
+                             facility_result=FacilityResult("hours", rows=[card]))
             return Reply(
                 f'The campus map does not publish opening hours for {card["name"]}. '
                 f'I can tell you where it is'
                 + (f' ({card["address"]})' if card["address"] else "")
                 + " and draw a route, but I will not guess its hours.",
                 slots=slots, facilities=[card],
+                facility_result=FacilityResult("hours", rows=[card]),
                 spoken=f'I do not have opening hours for {card["name"]}. '
                        f'I can show you where it is and draw a route.')
 
@@ -904,6 +1110,7 @@ class Dialogue:
                     "I can tell you where it is or draw a route, but I will not guess its "
                     "hours.",
                     slots=slots,
+                    facility_result=FacilityResult("hours", rows=[self._card(named[0])]),
                 )
 
         for score, doc in hits:
@@ -915,15 +1122,19 @@ class Dialogue:
                     + "\nSource: PolyU campus map."
                 )
                 spoken = f'{doc.title}. Today: {today_hours(doc.hours) or "closed"}. {why[:1].upper()}{why[1:]}.'
-                return Reply(text, slots=slots, spoken=spoken)
+                return Reply(text, slots=slots, spoken=spoken,
+                             facility_result=FacilityResult("hours", rows=[self._document_card(doc)]))
         if hits:
             doc = hits[0][1]
             return Reply(
                 f'The campus map does not publish opening hours for "{doc.title}". '
                 "I can give you its address or draw a route instead.",
                 slots=slots,
+                facility_result=FacilityResult("hours", rows=[self._document_card(doc)]),
             )
-        return self._dont_know(query, why="nothing in my knowledge base matches that")
+        reply = self._dont_know(query, why="nothing in my knowledge base matches that")
+        reply.slots, reply.facility_result = slots, FacilityResult("no_match", query)
+        return reply
 
     def _dont_know(self, subject: str, why: str = "") -> Reply:
         """The honest answer. Names the gap and what the bot does cover."""

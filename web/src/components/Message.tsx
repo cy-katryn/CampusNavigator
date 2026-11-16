@@ -45,31 +45,41 @@ const TAG =
 
 function FacilityCards({
   facilities,
+  lang,
   onPick,
 }: {
   facilities: FacilityCard[];
+  lang: string;
   onPick(name: string): void;
 }) {
+  const chinese = lang === 'zh-HK' || lang === 'zh-CN';
   return (
     <div className="mt-1 flex flex-col gap-1.5">
       {facilities.map((facility, index) => {
-        const where = [facility.building, facility.floor].filter(Boolean).join(', ');
+        const name = facility.display_name || facility.name;
+        const where = [facility.display_building || facility.building, facility.display_floor || facility.floor]
+          .filter(Boolean).join(chinese ? ' · ' : ', ');
         const bits: string[] = [];
         if (where) bits.push(where);
-        if (facility.metres != null) bits.push(facility.metres + ' m');
-        if (facility.hours_today) {
-          bits.push((facility.open_now === false ? 'closed · ' : 'open · ') + facility.hours_today);
+        if (facility.metres != null) bits.push(facility.metres + (chinese ? ' 米' : ' m'));
+        const hours = facility.display_hours || facility.hours_today;
+        if (hours) {
+          const open = lang === 'zh-HK' ? '開放中' : chinese ? '开放中' : 'open';
+          const closed = lang === 'zh-HK' ? '未開放' : chinese ? '未开放' : 'closed';
+          const status = typeof facility.open_now === 'boolean' ? (facility.open_now ? open : closed) : '';
+          bits.push(status && facility.hours_today?.toLowerCase() !== 'closed' ? status + ' · ' + hours : hours);
         }
         return (
-          <div
+          <button
+            type="button"
             key={facility.name + index}
-            className="cursor-pointer rounded-[10px] border border-line bg-panel-soft px-2.5 py-2 text-[12.5px] transition hover:border-brand"
-            title={'Ask for a route to ' + facility.name}
+            className="cursor-pointer text-left rounded-[10px] border border-line bg-panel-soft px-2.5 py-2 text-[12.5px] transition hover:border-brand"
+            title={(chinese ? '前往' : 'Ask for a route to ') + name}
             onClick={() => onPick(facility.name)}
           >
-            <b className="font-semibold text-brand-dark">{facility.name}</b>
-            {bits.length ? <div className="mt-0.5 text-[11.5px] text-muted">{bits.join(' · ')}</div> : null}
-          </div>
+            <b className="font-semibold text-brand-dark">{name}</b>
+            {bits.length ? <span className="mt-0.5 block text-[11.5px] text-muted">{bits.join(' · ')}</span> : null}
+          </button>
         );
       })}
     </div>
@@ -196,7 +206,7 @@ export function Message({ message, selection, onFacilityClick, onSelectRoute }: 
         ) : null}
 
         {payload.facilities && payload.facilities.length ? (
-          <FacilityCards facilities={payload.facilities} onPick={onFacilityClick} />
+          <FacilityCards facilities={payload.facilities} lang={payload.speech_lang || 'en-US'} onPick={onFacilityClick} />
         ) : null}
       </div>
     </div>

@@ -6,6 +6,8 @@ export interface GraphNode {
   lat: number;
   lng: number;
   kind: NodeKind;
+  aliases?: string[];
+  names?: Record<string, string>;
   parent?: string | null;
   building?: string | null;
   service?: string | null;
@@ -87,6 +89,10 @@ export interface RouteOption {
 
 export interface FacilityCard {
   name: string;
+  display_name?: string;
+  display_building?: string;
+  display_floor?: string;
+  display_hours?: string;
   building?: string;
   floor?: string;
   metres?: number;
@@ -101,6 +107,7 @@ export interface ChatPayload {
   text: string;
   lead?: string;
   speech?: string;
+  speech_lang?: string;
   narrated?: boolean;
   notes?: string[];
   intent?: string;
