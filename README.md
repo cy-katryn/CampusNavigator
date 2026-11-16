@@ -103,9 +103,8 @@ Four authored inputs, one generated file the app reads:
 |---|---|
 | `data/authored/campus_buildings.geojson` | the structure polygons — the 2.5D map |
 | `data/authored/campus_paths.geojson`  | the walkways, one LineString per stretch |
-| `data/authored/campus_nodes.geojson`  | doors and facilities traced from OpenStreetMap |
 | `data/authored/campus_pois.geojson`   | every POI the PolyU campus map publishes |
-| `data/authored/green_nodes.geojson`   | the GreenMap@PolyU recycling points |
+| `data/authored/green_nodes.geojson`   | the GreenMap@PolyU recycling points (not included) |
 | `data/processed_data/campus_graph.json` | **generated** — the only file the app reads |
 
 ```bash

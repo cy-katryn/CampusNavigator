@@ -29,27 +29,12 @@ AUTHORED_DIR = DATA_DIR / "authored"
 PROCESSED_DIR = DATA_DIR / "processed_data"
 ENV_PATH = PROJECT_ROOT / ".env"
 
-# Inputs you create:
-#   campus_nodes.geojson    Points    -> the places the bot can talk about
-#   campus_paths.geojson    Lines     -> the walkways, one feature per stretch
-#   campus_shapes.geojson   Polygons  -> the 2.5D map on the right of the screen
-# and the one file the app reads, which tools/build.py produces:
-#   campus_graph.json
-OSM_FILE = RAW_DIR / "osm_orig.osm"                    # or the .geojson of the same export
-NODES_FILE = AUTHORED_DIR / "campus_nodes.geojson"     # Points: the OSM export, reference
 GREEN_NODES_FILE = AUTHORED_DIR / "green_nodes.geojson"  # Points: GreenMap recycling / food waste
-CAMPUS_POIS_FILE = AUTHORED_DIR / "campus_pois1.geojson"  # Points: PolyU campus-map amenities
+NODES_FILE = AUTHORED_DIR / "campus_pois.geojson"  # Points: PolyU campus-map amenities
+SHAPES_FILE = AUTHORED_DIR / "campus_buildings.geojson"  # Polygons: the structures
+PATHS_FILE = AUTHORED_DIR / "campus_paths.geojson"    # Lines: the walkways you drew
 
-# Drawn, never routed: a structure is a picture on the map, not a destination.
-SHAPES_FILE = AUTHORED_DIR / "campus_buildings1.geojson"  # Polygons: the structures
-PATHS_FILE = AUTHORED_DIR / "campus_paths1.geojson"    # Lines: the walkways you drew
 GRAPH_FILE = PROCESSED_DIR / "campus_graph.json"
-
-# The node files the graph is built from. Every point in them is a destination, and a
-# destination is reachable exactly when its coordinate is one the drawn lines pass
-# through -- see build_graph(strict=True). campus_nodes1.geojson joins this tuple when
-# you export it; green_nodes.geojson joins it when the GreenMap points are re-checked.
-NODE_FILES = (CAMPUS_POIS_FILE,)
 
 DEFAULT_MODEL = "google/gemma-4-26b-a4b-it:free"
 

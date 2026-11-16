@@ -34,9 +34,6 @@ Thumbs.db
 *.bak
 *.orig
 
-# a stray hand copy of the generated POI file; delete the file or this line
-data/authored/campus_pois1.geojson
-
 # test scratch output
 tests/_tmp/
 

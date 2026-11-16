@@ -1,13 +1,13 @@
 {
  "meta": {
   "title": "Campus routing graph, built from authored nodes and walkways",
-  "generated_at": "2026-11-16T14:47:56+0800",
+  "generated_at": "2026-11-17T01:40:21+0800",
   "inputs": [
-   "data/authored/campus_pois1.geojson",
-   "data/authored/campus_paths1.geojson"
+   "data/authored/campus_pois.geojson",
+   "data/authored/campus_paths.geojson"
   ],
   "inputs_drawn_only": [
-   "data/authored/campus_buildings1.geojson"
+   "data/authored/campus_buildings.geojson"
   ],
   "real_data": [
    "walkway geometry: (c) OpenStreetMap contributors, ODbL, edited by us",
