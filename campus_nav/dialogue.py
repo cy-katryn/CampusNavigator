@@ -130,6 +130,7 @@ class Dialogue:
         self.client = client
         self.narrator = narrator
         self.state = SessionState()
+        self._scores: dict[str, int] = {}   # last resolve() scores, for tie-breaking
         # Built lazily: 876 documents cost about a tenth of a second, which is too
         # much to spend on a /help or /quit, and nothing for a real question.
         self._knowledge = knowledge
@@ -164,8 +165,12 @@ class Dialogue:
             return self._hours(slots)
 
         # If the previous turn left a question open (e.g. "where are you starting
-        # from?"), a bare place name is the answer to that question.
-        if self.state.pending:
+        # from?"), a bare place name is the answer to that question -- but only a bare
+        # one. A sentence that names both ends itself is a new request, and swallowing
+        # it as the missing half once produced "Block Y -> Block VA" from
+        # "from Block VA to Core U".
+        answering = self.state.pending and not (slots.origin_text and slots.destination_text)
+        if answering:
             hits = self._preferred_matches(text)
             if len(hits) == 1:
                 if self.state.pending == "origin":
@@ -227,9 +232,11 @@ class Dialogue:
         "library" matches both Pao Yue-kong Library and the four facilities in it;
         "battery bin" should pick the facility. SERVICE_WORDS decides which.
         """
-        matches = self.graph.resolve(text)
-        if not matches:
+        scored = self.graph.resolve_scored(text)
+        if not scored:
             return []
+        self._scores = {node.id: score for score, node in scored}
+        matches = [node for _, node in scored]
         # A child is not an alternative to its own parent: ""the library"" must not
         # offer ""Entrance (Pao Yue-kong Library)"" as a second choice just because the
         # building's name is part of the child's grouped name.
@@ -254,8 +261,18 @@ class Dialogue:
             return prefix
         wants_service = any(w in text.lower() for w in SERVICE_WORDS)
         if wants_service:
-            return [n for n in matches if n.kind == "service"] or matches
-        return [n for n in matches if n.kind != "service"] or matches
+            matches = [n for n in matches if n.kind == "service"] or matches
+        else:
+            matches = [n for n in matches if n.kind != "service"] or matches
+        # Keep only the best-scoring band. A weaker match is not an alternative to the
+        # phrase, it is a worse answer: "library" must not also offer "Block M (Li Ka
+        # Shing Tower)" merely because a word landed in its brackets.
+        top = max(self._scores.get(n.id, 0) for n in matches)
+        matches = [n for n in matches if self._scores.get(n.id, 0) == top]
+        # A plain name beats a qualified one at the same score: "Pao Yue-Kong Library"
+        # over "Pao Yue-kong Library (LIB)".
+        plain = [n for n in matches if "(" not in n.name]
+        return plain or matches
 
     def _resolve_or_ask(self, slots: Slots, previous: str | None, role: str) -> tuple[str | None, Reply | None]:
         """Resolve a place mention, or produce the clarifying question."""
@@ -478,6 +495,7 @@ class Dialogue:
         ask = self._absorb_places(slots)
         if ask:
             return Reply((prefix + "\n" if prefix else "") + ask.text, slots=slots)
+        # Resolving the places is what may have left a note, so read it afterwards.
 
         # Ask for whatever is still missing, naming the half we already know.
         if not self.state.destination and not self.state.origin:
@@ -505,6 +523,17 @@ class Dialogue:
 
         self.state.pending = None
         origin, destination = self.state.origin, self.state.destination
+        if origin and origin == destination:
+            # "from VA to Core H" collapsing onto one node is not a 0 m journey, it is a
+            # failed reading of the sentence. Say so instead of drawing nothing.
+            self.state.destination = None
+            self.state.pending = "destination"
+            return Reply(
+                (prefix + "\n" if prefix else "")
+                + f"Both ends came out as {self.graph.node(origin).name}. "
+                "Where would you like to go instead?",
+                slots=slots,
+            )
 
         previous_total = self.state.last_route.total_metres if self.state.last_route else None
 

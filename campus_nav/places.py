@@ -39,24 +39,6 @@ GREEN_ACCEPTS: dict[str, tuple[str, ...]] = {
     "Pantry Food Waste Collection": ("food_waste",),
 }
 
-# Extra wording that should find each category even when the user does not repeat
-# the category name. Folded into the node's aliases at build time.
-GREEN_ALIASES: dict[str, tuple[str, ...]] = {
-    "Recyclables Collection": ("recycling", "recycle", "recycling bins"),
-    "UniRe© (University / Universal Recycling Facilities)": ("unire", "recycling", "recycling bins"),
-    "Glass Bottle Collection": ("glass", "glass bottle", "bottles"),
-    "Rechargeable Battery Collection": ("battery", "batteries", "power bank"),
-    "Waste Electrical and Electronic Equipment Collection": ("weee", "electronics", "e-waste"),
-    "Reverse Vending Machine": ("rvm", "vending machine"),
-    "Canteen Food Waste Collection": ("food waste", "kitchen"),
-    "Pantry Food Waste Collection": ("food waste", "pantry"),
-}
-
-
-def green_aliases(category: str) -> list[str]:
-    return list(GREEN_ALIASES.get(category, ()))
-
-
 # ------------------------------------------------------------------- campus map
 # Campus-map category -> (label the bot uses, canonical capabilities).
 # An empty capability tuple means "this place exists and is navigable, but the bot
@@ -164,56 +146,36 @@ def facility_capability(word: str) -> str:
     return FACILITY_WORDS.get(text, FACILITY_WORDS.get(text.rstrip("s"), text))
 
 
-# ------------------------------------------------------- reading OSM geometry
-# The map is drawn from whatever tags the GeoJSON carries. An authoring file may set
-# a "kind" property directly; when it carries raw OpenStreetMap tags instead, these
-# two functions decide what the shape is and how tall it is. They live here because
-# both the renderer (web.py) and the graph builder (tools/build.py) need the same
-# answer, and two copies of this table would drift.
-FLAT_KINDS = ("water", "green", "pitch", "plaza", "bridge", "path")
-
-# A shape with one of these tags is not a building, whatever else it says.
-_LEISURE_FLAT = {
-    "pitch": "pitch", "track": "pitch", "stadium": "pitch",
-    "garden": "green", "park": "green", "common": "green",
-    "swimming_pool": "water",
-}
-_LANDUSE_FLAT = {
-    "recreation_ground": "pitch", "grass": "green",
-    "village_green": "green", "meadow": "green",
+# ------------------------------------------------------------- drawn geometry
+# The "place" column decides how a drawn shape is painted:
+#
+#   empty            -> a building, extruded
+#   "square"         -> flat, painted as a plaza
+#   "garden"         -> flat, painted as green
+#   "pool"           -> flat, painted as water
+#
+# Anything else non-empty is still FLAT -- an unknown word must never turn a surface into
+# a tower -- and is painted as a plaza.
+_PLACE_KIND = {
+    "square": "plaza",
+    "garden": "green",
+    "pool": "water",
 }
 
 FLOOR_HEIGHT_M = 3.2
 
 
 def shape_kind(props: dict, is_line: bool = False) -> str:
-    """What a drawn feature is: a building, or something that has no height."""
+    """What a drawn feature is: a block to extrude, or a flat surface."""
     props = props or {}
     if props.get("kind"):
         return str(props["kind"])
     if is_line:
-        return "bridge" if (props.get("bridge") or props.get("man_made") == "bridge") else "path"
-    if props.get("bridge") == "yes" or props.get("man_made") == "bridge":
-        return "bridge"
-    if props.get("natural") == "water" or props.get("water") or \
-            props.get("landuse") == "reservoir":
-        return "water"
-    # A paved square is a place you stand in, not a block you look at. Overpass exports
-    # them as polygons, so without this they would be extruded into concrete towers.
-    if props.get("place") == "square" or props.get("area:highway") or \
-            props.get("not:highway") == "pedestrian" or \
-            (props.get("area") == "yes" and props.get("highway") in {"footway", "pedestrian"}):
-        return "plaza"
-    leisure = props.get("leisure") or ""
-    if leisure in _LEISURE_FLAT:
-        return _LEISURE_FLAT[leisure]
-    if (props.get("landuse") or "") in _LANDUSE_FLAT:
-        return _LANDUSE_FLAT[props["landuse"]]
-    if props.get("sport"):
-        return "pitch"
-    if props.get("man_made") == "planter" or props.get("natural") in {"wood", "scrub"}:
-        return "green"
-    return "building"
+        return "path"
+    place = str(props.get("place") or "").strip().lower()
+    if not place:
+        return "building"
+    return _PLACE_KIND.get(place, "plaza")
 
 
 def feature_height(props: dict) -> float | None:

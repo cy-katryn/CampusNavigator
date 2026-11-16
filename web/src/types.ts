@@ -32,6 +32,8 @@ export interface Footprint {
   line?: boolean;
   height?: number;
   tone?: string;
+  /** The letter to print on the roof: the block code the data gives, never a guess. */
+  display?: string;
 }
 
 export interface Graph {

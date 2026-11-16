@@ -62,7 +62,6 @@ from campus_nav.places import (  # noqa: E402
     CAMPUS_SERVICES,
     GREEN_ACCEPTS,
     feature_height,
-    green_aliases,
     shape_kind,
 )
 
@@ -215,13 +214,6 @@ def campus_places(with_rooms: bool = False) -> list[dict]:
         used_ids[base] = used_ids.get(base, 0) + 1
         ident = base if used_ids[base] == 1 else f"{base}_{used_ids[base]}"
 
-        aliases = []
-        for value in (record.get("loc"), record.get("loc_code")):
-            if value and str(value) not in aliases and str(value) != name_en:
-                aliases.append(str(value))
-        if category == "Toilet" and is_truthy(record.get("toilet_for_disabled")):
-            aliases.append("accessible")
-
         kind = campus_kind(category)
         address = (record.get("addr") or {}).get("en_US", "")
         loc = (record.get("loc") or "").strip()
@@ -243,7 +235,6 @@ def campus_places(with_rooms: bool = False) -> list[dict]:
             "floor": floor,
             "parent": parent,
             "source": "campus-map",
-            "aliases": ";".join(aliases),
             # kept for the graph builder, not written to the file
             "_lat": round(float(lat), 6),
             "_lng": round(float(lng), 6),
@@ -394,7 +385,6 @@ def green_places() -> list[dict]:
             "service": category,
             "source": "greenmap",
             "ref": str(record.get("uid", "")),
-            "aliases": [category.lower(), *green_aliases(category)],
         })
     return places
 
@@ -414,7 +404,6 @@ def cmd_green(args) -> int:
     features = []
     for place in places:
         props = {k: v for k, v in place.items() if k not in ("lat", "lng")}
-        props["aliases"] = ";".join(place.get("aliases") or [])
         features.append({
             "type": "Feature",
             "properties": props,
@@ -551,7 +540,10 @@ CAMPUS_ROLES = {
     "main locations": ("place", ""),
     "public transport": ("service", "Bus Stop"),
     "amenities": ("service", ""),
-    "buildings / cores / wings / blocks": ("reference", ""),
+    # A block is a place you can ask for by name ("Block Y (Lee Shau Kee Building)"),
+    # and 45 of these 52 anchors sit exactly on a drawn path vertex, so they are ordinary
+    # destinations. "place" rather than "building": the map already draws the polygon.
+    "buildings / cores / wings / blocks": ("place", "Building"),
 }
 
 
@@ -585,18 +577,15 @@ def place_from_feature(feature: dict) -> dict:
         name = service or ENTRANCE_LABELS.get(entrance, "Entrance") if kind == "entrance" \
             else (service or "Unnamed place")
 
-    aliases = props.get("aliases")
-    if isinstance(aliases, str):
-        aliases = [a for a in aliases.split(";") if a]
-    aliases = list(aliases or [])
-    for field in ("name:zh", "name:en", "alt_name", "brand", "operator"):
-        value = str(props.get(field) or "").strip()
-        if value and value != name and value not in aliases:
-            aliases.append(value)
+    # A place has exactly two names: the English one and the Chinese one. There is no
+    # third list of invented search words -- a node answers to its name, its Chinese
+    # name and its id, and that is what the dialogue matches against.
+    name_zh = str(props.get("name:zh") or "").strip()
 
     return {
         "id": str(props.get("id") or f"N{lat},{lng}"),
         "name": name,
+        "name_zh": name_zh,
         "lat": lat,
         "lng": lng,
         "kind": kind,
@@ -606,7 +595,6 @@ def place_from_feature(feature: dict) -> dict:
         "service": service,
         "source": str(props.get("source") or "osm"),
         "ref": str(props.get("ref") or props.get("id") or ""),
-        "aliases": aliases,
         "accepts": accepts_for(service),
     }
 
@@ -817,7 +805,9 @@ def paths_from_geojson(path: Path, highways: tuple[str, ...]) -> list[dict]:
     Overpass-turbo's GeoJSON export keeps the OSM tags as properties, so highway,
     covered and indoor survive the trip and the extraction is the same one.
     """
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    # utf-8-sig, not utf-8: a BOM from a Windows editor makes json.loads fail on a
+    # file that looks perfectly fine in the editor you saved it from.
+    raw = json.loads(path.read_text(encoding="utf-8-sig"))
     features = []
     for feature in raw.get("features") or []:
         geometry = feature.get("geometry") or {}
@@ -919,7 +909,7 @@ def read_authored(path: Path, geometry: str) -> list[dict]:
             f"missing {rel(path)}\n"
             f"  create it: python tools/build.py {'nodes' if geometry == 'Point' else 'paths'}"
         )
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8-sig")  # tolerate a BOM from a Windows editor
     if not text.strip():
         raise SystemExit(
             f"{rel(path)} is empty (0 bytes).\n"
@@ -945,7 +935,14 @@ def read_authored(path: Path, geometry: str) -> list[dict]:
 
 def build_graph(node_features: list[dict], path_features: list[dict],
                 building_features: list[dict] = (), repair_m: float = REPAIR_M,
-                keep_decor: bool = False) -> dict:
+                keep_decor: bool = False, strict: bool = False) -> dict:
+    """Build the routing graph.
+
+    strict=True joins a place to the network only where its coordinate is one the drawn
+    lines already pass through -- no welding to the nearest vertex, no tolerance. A place
+    off the network is then reported, not silently tied to the closest thing, because a
+    link the file does not contain is an invented distance.
+    """
     structures = structure_index(list(building_features))
 
     places = []
@@ -1007,6 +1004,11 @@ def build_graph(node_features: list[dict], path_features: list[dict],
             # a written parent that matches no polygon: keep the words, drop the link
             place["building"] = parent
             parent = None
+        if parent is None:
+            # The authored file carries "parent" as a building NAME. In the graph that
+            # key has to be a node id, and buildings are no longer nodes at all, so a
+            # leftover name would make the indoor rule strand the place forever.
+            place.pop("parent", None)
         if parent and place["kind"] in ("service", "place", "entrance"):
             # A polygon can be drawn without being a destination (routable=no), so the
             # parent link must point at a node that exists in the graph. When the
@@ -1051,7 +1053,8 @@ def build_graph(node_features: list[dict], path_features: list[dict],
             " silently disappears"
         )
     if any(place["kind"] == "waypoint" for place in places):
-        raise SystemExit(f"{rel(NODES_FILE)} must hold places only, not waypoints")
+        raise SystemExit(
+            f"{', '.join(rel(p) for p in NODE_FILES)} must hold places only, not waypoints")
 
     # ---- the walkway network, exactly as drawn
     coords: dict[tuple[float, float], tuple[float, float]] = {}
@@ -1111,6 +1114,7 @@ def build_graph(node_features: list[dict], path_features: list[dict],
     # ---- every place attaches to its nearest walkway vertex
     attached: dict[tuple[float, float], list[dict]] = {}
     problems = []
+    unjoined: list[str] = []
     indoor: list[dict] = []
     for place in places:
         # A facility inside a building is not a point on the pavement: you reach it by
@@ -1124,6 +1128,17 @@ def build_graph(node_features: list[dict], path_features: list[dict],
             ((key, haversine_m(place["lat"], place["lng"], *coords[key])) for key in coords),
             key=lambda pair: pair[1],
         )
+        if strict:
+            # Joining is a coordinate match or nothing. A place 4 cm from a line is not on
+            # that line: a line has no vertex there, so there is nothing to join to.
+            here = vertex_key(place["lat"], place["lng"])
+            if here in coords:
+                attached.setdefault(here, []).append(place)
+            else:
+                unjoined.append(
+                    f"{place['id']} ({str(place.get('name') or 'unnamed')[:36]}) "
+                    f"{best_d:.1f} m from the nearest vertex")
+            continue
         if best_d > ATTACH_M:
             # Two very different situations, and they must not be confused. A place a
             # couple of hundred metres off means the drawing is wrong. A place 1.6 km
@@ -1145,8 +1160,17 @@ def build_graph(node_features: list[dict], path_features: list[dict],
         raise SystemExit(
             f"{len(problems)} place(s) are not on the walkway network:\n  "
             + "\n  ".join(problems[:12])
-            + f"\n  draw a path to them, move them, or delete them in {rel(NODES_FILE)}"
+            + "\n  draw a path to them, move them, or delete them in "
+            + ", ".join(rel(p) for p in NODE_FILES)
         )
+
+    if unjoined:
+        print(f"  {len(unjoined)} place(s) share no coordinate with a drawn vertex, so "
+              f"nothing joins them to the network:")
+        for row in unjoined[:12]:
+            print(f"      {row}")
+        if len(unjoined) > 12:
+            print(f"      ... {len(unjoined) - 12} more")
 
     if off_network:
         print(f"  {len(off_network)} place(s) are published by PolyU but beyond this "
@@ -1218,7 +1242,8 @@ def build_graph(node_features: list[dict], path_features: list[dict],
             nodes.append(dict(place))
             edges.append({
                 "id": "", "u": wp_id[key], "v": place["id"],
-                "metres": round(max(haversine_m(*coords[key], place["lat"], place["lng"]), 1.0), 1),
+                "metres": round(max(haversine_m(*coords[key], place["lat"], place["lng"]),
+                                  0.1 if strict else 1.0), 1),
                 "open": True, "covered": False, "stairs": False,
                 "path": [[round(coords[key][0], 6), round(coords[key][1], 6)],
                          [place["lat"], place["lng"]]],
@@ -1236,7 +1261,10 @@ def build_graph(node_features: list[dict], path_features: list[dict],
         "meta": {
             "title": "Campus routing graph, built from authored nodes and walkways",
             "generated_at": datetime.now(HKT).strftime("%Y-%m-%dT%H:%M:%S%z"),
-            "inputs": [rel(NODES_FILE), rel(SHAPES_FILE), rel(PATHS_FILE)],
+            "inputs": ([rel(p) for p in NODE_FILES if p.exists()] + [rel(PATHS_FILE)]),
+            # Structures are drawn by the map but never enter the graph: no polygon
+            # becomes a node, so nothing can be routed to a building.
+            "inputs_drawn_only": [rel(SHAPES_FILE)],
             "real_data": [
                 "walkway geometry: (c) OpenStreetMap contributors, ODbL, edited by us",
                 "place positions and names: PolyU campus map and GreenMap@PolyU",
@@ -1718,9 +1746,11 @@ def cmd_audit(args) -> int:
 
 def cmd_graph(args) -> int:
     nodes = read_node_features()
-    buildings = read_building_features()
     paths = read_authored(PATHS_FILE, "LineString")
-    graph = build_graph(nodes, paths, buildings, args.repair, args.keep_decor)
+    # Structures are not passed in: a polygon is a picture on the map, not a destination.
+    # Every routable thing in this graph is a point from the node files.
+    graph = build_graph(nodes, paths, [], args.repair, args.keep_decor,
+                        strict=not args.weld)
     write_json(GRAPH_FILE, graph)
     counts = graph["meta"]["counts"]
     print(f"WROTE {rel(GRAPH_FILE)}")
@@ -1786,8 +1816,13 @@ def main(argv: list[str] | None = None) -> int:
     overlaps.set_defaults(func=cmd_overlaps)
 
     graph = sub.add_parser("graph", help="build campus_graph.json from the authored files")
-    graph.add_argument("--repair", type=float, default=REPAIR_M,
-                       help="join a loose walkway end this close to another line")
+    graph.add_argument("--repair", type=float, default=0.0,
+                       help="join a loose walkway end this close to another line; 0 (the "
+                            "default) keeps every end exactly where you drew it")
+    graph.add_argument("--weld", action="store_true",
+                       help="ALSO tie places up to 120 m from the network to their nearest "
+                            "vertex (the old behaviour). Off by default, so a place joins "
+                            "only where it shares a coordinate with a drawn vertex.")
     graph.add_argument("--keep-decor", action="store_true",
                        help="also route to benches, trees and other street furniture")
     graph.set_defaults(func=cmd_graph)

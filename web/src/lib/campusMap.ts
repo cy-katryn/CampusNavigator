@@ -3,7 +3,6 @@ import {
   categoryOf,
   hash01,
   METRES_PER_DEG_LAT,
-  pointInRing,
   shortCode,
   type Category,
 } from './geo';
@@ -421,37 +420,17 @@ export class CampusMap {
       });
 
     const rings: Footprint[] = all.filter((item) => !item.line);
-    const buildings = [...this.nodes.values()].filter((n) => n.kind === 'building');
 
     const blocks = rings
       .map((item) => {
         const coords = item.ring.map(([lat, lng]) => this.project(lat, lng));
         const north = Math.max(...item.ring.map((p) => p[0]));
-        let nearest: GraphNode | null = null;
-        let ownerDistance = Infinity;
-        const centre = item.ring.reduce<[number, number]>(
-          (acc, p) => [acc[0] + p[0] / item.ring.length, acc[1] + p[1] / item.ring.length],
-          [0, 0],
-        );
-        for (const building of buildings) {
-          // deg^2 is fine for "nearest": ~110 km/deg, so 1 deg^2 is about 1.2e10 m^2
-          const d = (building.lat - centre[0]) ** 2 + (building.lng - centre[1]) ** 2;
-          if (d < ownerDistance) {
-            ownerDistance = d;
-            nearest = building;
-          }
-        }
-
-        // Which letter belongs on this roof? The polygon's own name first, then the
-        // footprint it stands inside, and only then the nearest node.
-        let badge = item.name ? shortCode(item.name) : '';
-        if (!badge) {
-          const outer = rings.find(
-            (other) => other !== item && other.name && pointInRing(centre[1], centre[0], other.ring),
-          );
-          if (outer?.name) badge = shortCode(outer.name);
-        }
-        if (!badge && nearest) badge = shortCode(nearest.name);
+        // Which letter belongs on this roof? The one the data gives: "display" if
+        // present, else the block code behind it. Nothing else. Deriving a code from
+        // the name is what put "LE" on the Lee Shau Kee Building (whose block is Y) and
+        // "JO" on the Innovation Tower (whose block is V), and it invented codes for the
+        // eleven unnamed slabs too.
+        const badge = item.display || '';
         // a hand-drawn shape may carry its own height; otherwise vary it deterministically
         const height = item.height || maxHeight * (0.55 + hash01(item.id, 3) * 0.45);
         const tone = item.tone ? ' tone-' + item.tone : '';
@@ -609,6 +588,12 @@ export class CampusMap {
           const code = el('text', { x: p.x, y: p.y + size * 0.17, class: 'node-code' });
           code.textContent = shortCode(node.name);
           g.appendChild(code);
+        }
+        if (node.kind === 'place') {
+          // filed under the "clinic · other" chip, so that chip means "every destination
+          // that is not a facility" and the default map stays clean
+          g.classList.add('cat-service');
+          this.serviceGroups.push({ el: g, cat: 'service' });
         }
       }
       const tip = el('title', {});

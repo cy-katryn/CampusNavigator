@@ -28,6 +28,7 @@ Thumbs.db
 .idea/
 
 # scratch: editor/session temp files and hand-made backups
+.tmp/
 .tmp_*
 *.bak
 *.orig

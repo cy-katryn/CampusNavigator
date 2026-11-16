@@ -91,7 +91,7 @@ def _place_catalogue(graph: CampusGraph, limit: int = 90) -> str:
 
     rows = []
     for node in buildings[:limit]:
-        extra = f" ({', '.join(node.aliases[:3])})" if node.aliases else ""
+        extra = f" ({node.name_zh})" if node.name_zh else ""
         rows.append(f"- {node.id}: {node.name}{extra}")
     for node in representatives.values():
         rows.append(f"- {node.id}: {node.name} [one of the '{node.service}' places]")
@@ -167,6 +167,21 @@ _TO_ONLY = re.compile(
     r"(?P<d>[a-z0-9][\w &'\-/().]*?)(?:[?.!,]|$)",
     re.I,
 )
+# "Block Y to Block L": an origin and a destination with no "from" at all. Only used
+# when the sentence starts with the origin, so "how do I get to X" is never read as a
+# journey from "how do i get".
+_A_TO_B = re.compile(
+    r"^(?P<o>[a-z0-9][\w &'\-/().]*?)\s+\bto\s+"
+    r"(?P<d>[a-z0-9][\w &'\-/().]*?)(?:[?.!,]|$)",
+    re.I,
+)
+# A lead-in verb or question word means the left half is not a place.
+_NOT_A_PLACE_START = re.compile(
+    r"^(?:i|im|i'm|we|how|what|where|when|which|why|who|can|could|would|will|do|does|"
+    r"is|are|please|get|go|walk|head|take|route|directions?|tell|show|need|want|"
+    r"to|from|at|of|in|on|and|the|a|an)\b",
+    re.I,
+)
 _HOW_FAR = re.compile(r"\bhow\s+far\b|\bdistance\b", re.I)
 _GREEN = re.compile(
     r"\b(recycle|recycling|recyclables?|bin|dispose|disposal|throw|dump|"
@@ -228,6 +243,11 @@ _FILLER = {
 }
 
 
+def known(graph: CampusGraph, text: str) -> bool:
+    """Does the graph recognise this as a name, with at least whole-word confidence?"""
+    return any(score >= 60 for score, _ in graph.resolve_scored(text))
+
+
 def _clean_place(text: str) -> str:
     """Drop filler words, but never the letter in a building name.
 
@@ -235,6 +255,8 @@ def _clean_place(text: str) -> str:
     single letter IS the place. Stripping it turned "Core A" into "Core", which matches
     eight buildings and forces a disambiguation question, so no route was ever drawn.
     """
+    # "go to Block Y" -> "Block Y": a verb in front of the place is not part of its name
+    text = re.sub(r"^(?:get|go|walk|head|take\s+me)\s+(?:to\s+)?", "", text.strip(), flags=re.I)
     words = [w for w in re.split(r"[\s,.?!]+", text.strip()) if w]
     kept = []
     for index, word in enumerate(words):
@@ -267,12 +289,22 @@ def parse_with_grammar(text: str, graph: CampusGraph) -> Slots:
         destination_text = _clean_place(m.group("d"))
         explicit_route = True
     else:
-        m2 = _TO_ONLY.search(lowered)
-        if m2:
-            cand = _clean_place(m2.group("d"))
-            if graph.resolve(cand):
-                destination_text = cand
+        both = _A_TO_B.match(lowered)
+        if both and not _NOT_A_PLACE_START.match(both.group("o").strip()):
+            start = _clean_place(both.group("o"))
+            end = _clean_place(both.group("d"))
+            # Both halves have to be recognised by name, not merely matched loosely:
+            # "to Taxi Drop-off Point to Core A" must not become a trip from "to".
+            if known(graph, start) and known(graph, end):
+                origin_text, destination_text = start, end
                 explicit_route = True
+        if not explicit_route:
+            m2 = _TO_ONLY.search(lowered)
+            if m2:
+                cand = _clean_place(m2.group("d"))
+                if graph.resolve(cand):
+                    destination_text = cand
+                    explicit_route = True
 
     # A place mentioned without "to/from" (e.g. "the library?") still counts.
     if not destination_text:
@@ -310,7 +342,9 @@ def parse_with_grammar(text: str, graph: CampusGraph) -> Slots:
         origin_text = destination_text = ""   # a timetable question is not a route
     elif closed_text and not wants_hours:
         intent = "close"
-    elif facility_hit and not _ITEM.search(lowered):
+    elif facility_hit and not _ITEM.search(lowered) and not asks_for_route:
+        # "from toilet (block y) to the library" names a facility but is still a route:
+        # an explicit from/to outranks the facility keyword.
         intent = "facility_query"
     elif _FACILITY_ALL.search(lowered) and not (origin_text or destination_text):
         intent = "facility_query"   # no subject -> the overview reply lists what exists
