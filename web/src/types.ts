@@ -70,6 +70,19 @@ export interface RoutePayload {
   explain: unknown[];
 }
 
+/** One pickable way there: what the list in the reply shows, and the line to draw. */
+export interface RouteOption {
+  metres: number;
+  legs: number;
+  flights: number;
+  covered: number;
+  via: string;
+  start: string;
+  goal: string;
+  path: RoutePoint[];
+  segments: { path: [number, number][] }[];
+}
+
 export interface FacilityCard {
   name: string;
   building?: string;
@@ -91,6 +104,8 @@ export interface ChatPayload {
   intent?: string;
   parser?: string;
   route: RoutePayload | null;
+  /** Every route worth offering, cheapest first. Empty when the reply has no route. */
+  routes?: RouteOption[];
   facilities: FacilityCard[];
   error?: string;
 }

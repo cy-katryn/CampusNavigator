@@ -178,6 +178,39 @@ def route_payload(graph: CampusGraph, route) -> dict | None:
     }
 
 
+def route_option(graph: CampusGraph, route) -> dict | None:
+    """One pickable way there: what the chooser shows, plus the line to draw."""
+    if route is None or not route.reachable or len(route.path) < 2:
+        return None
+    places = [node for node in route.path if graph.node(node).kind != "waypoint"]
+    # the first real place after the start is the honest answer to "which way is this?"
+    via = ""
+    for node in places[1:-1]:
+        via = graph.node(node).name
+        break
+    return {
+        "metres": round(route.total_metres, 1),
+        "legs": max(len(places) - 1, 1),
+        "flights": sum(1 for seg in route.segments if seg.stairs),
+        "covered": sum(1 for seg in route.segments if seg.covered),
+        "via": via,
+        "start": graph.node(route.path[0]).name,
+        "goal": graph.node(route.path[-1]).name,
+        "path": [
+            {
+                "id": node_id,
+                "name": graph.node(node_id).name,
+                "lat": graph.node(node_id).lat,
+                "lng": graph.node(node_id).lng,
+            }
+            for node_id in places
+        ],
+        "segments": [
+            {"path": [list(point) for point in seg.path]} for seg in route.segments
+        ],
+    }
+
+
 def spoken_summary(reply, graph: CampusGraph) -> str:
     """A sentence meant for ears, built only from computed facts.
 
@@ -248,6 +281,13 @@ def chat_payload(graph: CampusGraph, reply) -> dict:
         # which NLU implementation produced these slots: "llm" or "grammar"
         "parser": getattr(getattr(reply, "slots", None), "source", ""),
         "route": route_payload(graph, getattr(reply, "route", None)),
+        "routes": [
+            option
+            for option in (
+                route_option(graph, route) for route in (getattr(reply, "routes", None) or [])
+            )
+            if option is not None
+        ],
         "facilities": list(getattr(reply, "facilities", []) or []),
     }
 

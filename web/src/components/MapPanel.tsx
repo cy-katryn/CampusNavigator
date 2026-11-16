@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ALL_CATEGORIES, type Category } from '../lib/geo';
 import { CampusMap, type ScaleInfo } from '../lib/campusMap';
-import type { FacilityCard, Graph, GraphNode, RoutePayload } from '../types';
+import type { FacilityCard, Graph, GraphNode, RouteOption } from '../types';
 import { LayerLegend } from './LayerLegend';
 import { PlaceSearch } from './PlaceSearch';
 
 export interface MapPanelProps {
   graph: Graph | null;
-  route: RoutePayload | null;
+  routes: RouteOption[];
+  routeSelection: number;
   facilities: FacilityCard[];
   mapRef: { current: CampusMap | null };
   onPrefill(text: string): void;
@@ -47,8 +48,8 @@ export function MapPanel(props: MapPanelProps) {
   }, [props.graph, props.mapRef]);
 
   useEffect(() => {
-    props.mapRef.current?.setRoute(props.route);
-  }, [props.route, props.mapRef]);
+    props.mapRef.current?.setRoutes(props.routes, props.routeSelection);
+  }, [props.routes, props.routeSelection, props.mapRef]);
 
   useEffect(() => {
     props.mapRef.current?.setFacilities(props.facilities);
@@ -70,13 +71,11 @@ export function MapPanel(props: MapPanelProps) {
     props.mapRef.current?.setBasemap(basemap);
   }, [basemap, props.mapRef]);
 
-  const navigating = Boolean(props.route && props.route.path.length >= 2);
+  const chosen = props.routes[props.routeSelection];
   const badge = useMemo(() => {
-    if (!navigating || !props.route) return null;
-    return props.route.reachable
-      ? Math.round(props.route.metres) + ' m · ' + props.route.segments.length + ' legs'
-      : 'no route with those closures';
-  }, [navigating, props.route]);
+    if (!chosen) return null;
+    return Math.round(chosen.metres) + ' m · ' + chosen.legs + (chosen.legs === 1 ? ' leg' : ' legs');
+  }, [chosen]);
 
   const choosePlace = (node: GraphNode) => {
     props.mapRef.current?.focusPlace(node);
@@ -116,15 +115,7 @@ export function MapPanel(props: MapPanelProps) {
 
         <PlaceSearch nodes={props.graph ? props.graph.nodes : []} onChoose={choosePlace} />
 
-        {navigating && badge ? (
-          <div
-            className={
-              'route-badge' + (props.route && !props.route.reachable ? ' failed' : '')
-            }
-          >
-            {badge}
-          </div>
-        ) : null}
+        {badge ? <div className="route-badge">{badge}</div> : null}
 
         <LayerLegend
           hidden={hidden}

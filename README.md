@@ -45,17 +45,22 @@ a fact that was not computed.
 ## What it does
 
 **Map** — extruded building blocks in PolyU red with grey roofs, paved squares and lawns
-painted flat, doorways, facility pins, and the walkway network. A red route appears only
-while you are navigating. The legend in the bottom-left corner switches each layer on.
+painted flat, doorways, facility pins, and the walkway network. Routes appear only while you
+are navigating: up to three ways there, each in its own colour, with the chosen one drawn
+solid over the others. The legend in the bottom-left corner switches each layer on.
 
 **Chat** — asks in plain language for a route between two places, re-plans when you report a
 link closed, lists the nearest facility of a kind, quotes opening hours from the published
-table, and abstains when the data has nothing.
+table, and abstains when the data has nothing. When there is more than one way there, the
+reply lists them — pick one and the map draws it.
 
 ```
 you> how do I get from the main entrance to the library?
 bot> Route: Main Entrance -> Pao Yue-kong Library
      Total: 230 m over 1 leg, 2 flights of steps
+     There are 2 other ways there:
+       2. 246 m over 1 leg, 1 flight of steps
+       3. 254 m over 1 leg, 1 flight of steps
 ```
 
 ## Data

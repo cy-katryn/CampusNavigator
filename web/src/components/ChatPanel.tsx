@@ -14,10 +14,14 @@ export interface ChatPanelProps {
   hint: string;
   /** Increments when something outside the panel wants the composer focused. */
   focusSignal: number;
+  /** The message whose route list is live on the map, and which option. */
+  routeMessageId: number | null;
+  routeSelection: number;
   onDraftChange(value: string): void;
   onSend(text: string): void;
   onReset(): void;
   onFacilityClick(name: string): void;
+  onSelectRoute(messageId: number, index: number): void;
   onMic(): void;
   onToggleVoice(): void;
   onLangChange(lang: string): void;
@@ -47,7 +51,15 @@ export function ChatPanel(props: ChatPanelProps) {
 
       <div className="chat" ref={chat}>
         {props.messages.map((message) => (
-          <Message key={message.id} message={message} onFacilityClick={props.onFacilityClick} />
+          <Message
+            key={message.id}
+            message={message}
+            selection={
+              props.routeMessageId === message.id ? props.routeSelection : null
+            }
+            onFacilityClick={props.onFacilityClick}
+            onSelectRoute={(index) => props.onSelectRoute(message.id, index)}
+          />
         ))}
       </div>
 

@@ -40,6 +40,9 @@ class Reply:
     # Structured places the reply is talking about, so a map or a card view can
     # render them without re-parsing the prose.
     facilities: list[dict] = field(default_factory=list)
+    # Every route worth offering, cheapest first. `route` is routes[0]; the rest are
+    # real alternatives the user can pick between.
+    routes: list[RouteResult] = field(default_factory=list)
     # What a text-to-speech engine should say. Set explicitly by the handler, because
     # reading the printed table aloud is unlistenable and guessing here would let the
     # audio drift from the screen.
@@ -394,23 +397,25 @@ class Dialogue:
             if node.parent == node_id and node.kind == "entrance"
         ]
 
-    def _best_route(self, origin: str, destination: str):
+    def _best_route(self, origin: str, destination: str, avoid: set[str] | None = None):
         """Route to the cheapest way IN, not to the middle of the building.
 
         Every door of the destination is a candidate goal. The shortest reachable
         route wins, so "take me to Shaw Amenities Building" arrives at whichever
         entrance is actually nearest from where you are. A building without doors
-        falls back to its own anchor.
+        falls back to its own anchor. `avoid` adds link ids to close for this search
+        only, which is how the alternatives are generated.
         """
         doors = self._doors_of(destination)
         goals = doors if doors else [destination]
         blocked = self._blocked()
+        closed_edges = set(self.state.closed_edges) | set(avoid or ())
         best = None
         for goal in goals:
             candidate = search(
                 self.graph, origin, goal,
                 algorithm="astar",
-                closed_edges=self.state.closed_edges,
+                closed_edges=closed_edges,
                 closed_nodes=blocked,
             )
             if not candidate.reachable:
@@ -424,9 +429,50 @@ class Dialogue:
         return search(
             self.graph, origin, destination,
             algorithm="astar",
-            closed_edges=self.state.closed_edges,
+            closed_edges=closed_edges,
             closed_nodes=blocked,
         )
+
+    def _route_options(self, origin: str, destination: str, limit: int = 3) -> list[RouteResult]:
+        """The cheapest route, plus genuinely different ways of getting there.
+
+        Each alternative is a real A* result with one leg of the best route closed for
+        that search: no path is smoothed, spliced or invented, and a candidate that
+        comes back identical is dropped because that leg was never the only way
+        through. The longest leg goes first -- removing it changes the most.
+        """
+        primary = self._best_route(origin, destination)
+        if not primary.reachable:
+            return [primary]
+        options = [primary]
+        seen = {tuple(primary.path)}
+        for segment in sorted(primary.segments, key=lambda s: s.metres, reverse=True):
+            candidate = self._best_route(origin, destination, {segment.edge_id})
+            if not candidate.reachable:
+                continue
+            key = tuple(candidate.path)
+            if key in seen:
+                continue
+            seen.add(key)
+            options.append(candidate)
+            if len(options) >= limit:
+                break
+        return options
+
+    def _describe_alternatives(self, routes: list[RouteResult]) -> str:
+        """One line per alternative, in the text, for the terminal and for search."""
+        lines = []
+        for index, route in enumerate(routes[1:], start=2):
+            places = [n for n in route.path if self.graph.node(n).kind != "waypoint"]
+            legs = max(len(places) - 1, 1)
+            flights = sum(1 for seg in route.segments if seg.stairs)
+            bits = f"{route.total_metres:.0f} m over {legs} leg{'s' if legs != 1 else ''}"
+            if flights:
+                bits += f", {flights} flight{'s' if flights != 1 else ''} of steps"
+            lines.append(f"  {index}. {bits}")
+        count = len(lines)
+        head = f"There {'is' if count == 1 else 'are'} {count} other way{'s' if count != 1 else ''} there:"
+        return head + "\n" + "\n".join(lines)
 
     def _route_reply(self, slots: Slots, prefix: str = "") -> Reply:
         ask = self._absorb_places(slots)
@@ -475,7 +521,8 @@ class Dialogue:
         if parent and parent in self.graph.nodes:
             indoor_note = self._indoor_text(destination)
             goal = parent
-        route = self._best_route(origin, goal)
+        routes = self._route_options(origin, goal)
+        route = routes[0]
 
         notes: list[str] = []
         constraints = []
@@ -498,11 +545,14 @@ class Dialogue:
             facts = self._facts_from_route(route, origin, destination, constraints, previous_total)
             narration = self._narrate(facts)
             text = (narration.text + "\n\n" + template) if narration.ok else template
-            reply = Reply((prefix + "\n" if prefix else "") + text, route=route, slots=slots, notes=notes)
+            reply = Reply((prefix + "\n" if prefix else "") + text, route=route, slots=slots,
+                          notes=notes, routes=routes)
             self._attach_narration(reply, narration)
             return reply
 
         text = fmt_route(self.graph, route)
+        if len(routes) > 1:
+            text += "\n" + self._describe_alternatives(routes)
         if indoor_note:
             text += "\n" + indoor_note
         if previous_total is not None:
@@ -532,7 +582,7 @@ class Dialogue:
         narration = self._narrate(facts)
         body = (narration.text + "\n\n" + text) if narration.ok else text
         reply = Reply((prefix + "\n" if prefix else "") + body, route=route, slots=slots,
-                      notes=notes, comparison=comparison)
+                      notes=notes, comparison=comparison, routes=routes)
         self._attach_narration(reply, narration)
         return reply
 

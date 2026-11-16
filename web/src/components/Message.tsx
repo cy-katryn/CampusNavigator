@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatPayload, FacilityCard } from '../types';
+import type { ChatMessage, ChatPayload, FacilityCard, RouteOption } from '../types';
 
 function Readable({ text }: { text: string }) {
   // Keep the engineer-readable part (segment table, search stats) visually quieter.
@@ -71,10 +71,51 @@ function FacilityCards({
 
 export interface MessageProps {
   message: ChatMessage;
+  /** Which option of THIS message is currently on the map, or null. */
+  selection: number | null;
   onFacilityClick(name: string): void;
+  onSelectRoute(index: number): void;
 }
 
-export function Message({ message, onFacilityClick }: MessageProps) {
+function RouteOptions({
+  routes,
+  selection,
+  onSelect,
+}: {
+  routes: RouteOption[];
+  selection: number | null;
+  onSelect(index: number): void;
+}) {
+  if (routes.length < 2) return null;
+  return (
+    <div className="route-options">
+      {routes.map((route, index) => {
+        const facts = [
+          route.legs + (route.legs === 1 ? ' leg' : ' legs'),
+          route.flights
+            ? route.flights + (route.flights === 1 ? ' flight of steps' : ' flights of steps')
+            : 'no steps',
+          route.via ? 'via ' + route.via : '',
+        ].filter(Boolean);
+        return (
+          <button
+            key={index}
+            type="button"
+            className={'route-option' + (selection === index ? ' selected' : '')}
+            onClick={() => onSelect(index)}
+            title={'Show route ' + (index + 1) + ' on the map'}
+          >
+            <i style={{ background: 'var(--route-' + (index + 1) + ')' }} />
+            <span className="m">{Math.round(route.metres)} m</span>
+            <span className="d">{facts.join(' · ')}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function Message({ message, selection, onFacilityClick, onSelectRoute }: MessageProps) {
   const { role, payload } = message;
 
   if (role === 'user' || typeof payload === 'string') {
@@ -104,6 +145,14 @@ export function Message({ message, onFacilityClick }: MessageProps) {
         ) : (
           <Readable text={payload.text} />
         )}
+
+        {payload.routes && payload.routes.length ? (
+          <RouteOptions
+            routes={payload.routes}
+            selection={selection}
+            onSelect={onSelectRoute}
+          />
+        ) : null}
 
         {payload.narrated || payload.parser || tags.length ? (
           <div className="tags">

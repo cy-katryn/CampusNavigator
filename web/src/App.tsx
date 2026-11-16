@@ -8,7 +8,14 @@ import type { AvatarState } from './components/AvatarDock';
 import type { CampusMap } from './lib/campusMap';
 import { cancelSpeech, speak } from './lib/speech';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
-import type { ChatMessage, ChatPayload, FacilityCard, Graph, RoutePayload, Status } from './types';
+import type {
+  ChatMessage,
+  ChatPayload,
+  FacilityCard,
+  Graph,
+  RouteOption,
+  Status,
+} from './types';
 
 const GREETING =
   'Hi! I am PolyU Campus Navigator Chatbot. I am here to help you navigate the PolyU. ' +
@@ -18,7 +25,9 @@ export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
   const [engineOffline, setEngineOffline] = useState(false);
   const [graph, setGraph] = useState<Graph | null>(null);
-  const [route, setRoute] = useState<RoutePayload | null>(null);
+  const [routes, setRoutes] = useState<RouteOption[]>([]);
+  const [routeSelection, setRouteSelection] = useState(0);
+  const [routeMessageId, setRouteMessageId] = useState<number | null>(null);
   const [facilities, setFacilities] = useState<FacilityCard[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
@@ -51,6 +60,7 @@ export default function App() {
     const id = nextId.current;
     nextId.current += 1;
     setMessages((previous) => [...previous, { id, role, payload }]);
+    return id;
   }, []);
 
   const say = useCallback(
@@ -85,8 +95,11 @@ export default function App() {
           setAvatar('idle');
           return;
         }
-        push('bot', payload);
-        setRoute(payload.route);
+        const id = push('bot', payload);
+        const options = payload.routes && payload.routes.length ? payload.routes : [];
+        setRoutes(options);
+        setRouteSelection(0);
+        setRouteMessageId(options.length ? id : null);
         setFacilities(payload.facilities || []);
         say(payload.speech);
       } catch (error) {
@@ -140,7 +153,9 @@ export default function App() {
   const reset = async () => {
     await resetSession();
     setMessages([]);
-    setRoute(null);
+    setRoutes([]);
+    setRouteSelection(0);
+    setRouteMessageId(null);
     setFacilities([]);
     mapRef.current?.clearOverlays();
     cancelSpeech();
@@ -171,10 +186,16 @@ export default function App() {
           micRecording={recognition.listening}
           hint={recognition.hint}
           focusSignal={focusSignal}
+          routeMessageId={routeMessageId}
+          routeSelection={routeSelection}
           onDraftChange={setDraft}
           onSend={(text) => void send(text)}
           onReset={() => void reset()}
           onFacilityClick={(name) => void send('how do I get to ' + name + '?')}
+          onSelectRoute={(messageId, index) => {
+            setRouteMessageId(messageId);
+            setRouteSelection(index);
+          }}
           onMic={() => {
             cancelSpeech();
             recognition.start(lang);
@@ -190,7 +211,8 @@ export default function App() {
 
         <MapPanel
           graph={graph}
-          route={route}
+          routes={routes}
+          routeSelection={routeSelection}
           facilities={facilities}
           mapRef={mapRef}
           onPrefill={(text) => {

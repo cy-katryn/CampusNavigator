@@ -201,6 +201,50 @@ class TestDialogue(unittest.TestCase):
         self.assertTrue(reply.route.reachable)
 
 
+class TestRouteAlternatives(unittest.TestCase):
+    """The reply offers genuinely different ways there, cheapest first."""
+
+    def setUp(self) -> None:
+        self.graph = CampusGraph.load(GRAPH_PATH)
+        self.dialogue = Dialogue(self.graph, client=None)
+
+    def test_offers_distinct_routes_cheapest_first(self):
+        reply = self.dialogue.handle("How do I get from the main entrance to the library?")
+        self.assertGreater(len(reply.routes), 1, "the campus has more than one way there")
+        self.assertEqual(reply.routes[0].path, reply.route.path)
+        metres = [route.total_metres for route in reply.routes]
+        self.assertEqual(metres, sorted(metres))
+        paths = [tuple(route.path) for route in reply.routes]
+        self.assertEqual(len(paths), len(set(paths)), "alternatives must differ")
+        self.assertIn("other way", reply.text)
+
+    def test_each_alternative_is_a_real_measured_path(self):
+        reply = self.dialogue.handle("How do I get from the main entrance to the library?")
+        for route in reply.routes:
+            self.assertTrue(route.reachable)
+            self.assertAlmostEqual(
+                route.total_metres, sum(segment.metres for segment in route.segments), places=1
+            )
+
+    def test_unreachable_reply_offers_nothing_to_choose(self):
+        self.dialogue.handle("How do I get from the main entrance to the library?")
+        reply = self.dialogue.handle("The library is closed today.")
+        self.assertEqual(len(reply.routes), 1)
+        self.assertFalse(reply.routes[0].reachable)
+        self.assertNotIn("other way", reply.text)
+
+    def test_payload_carries_one_drawable_option_per_route(self):
+        from campus_nav.web import chat_payload
+
+        reply = self.dialogue.handle("How do I get from the main entrance to the library?")
+        payload = chat_payload(self.graph, reply)
+        self.assertEqual(len(payload["routes"]), len(reply.routes))
+        first = payload["routes"][0]
+        self.assertEqual(first["metres"], round(reply.routes[0].total_metres, 1))
+        self.assertTrue(first["segments"], "the map needs real geometry to draw")
+        self.assertGreaterEqual(len(first["path"]), 2)
+
+
 class StubClient:
     """A stand-in for the OpenRouter client: returns one canned model reply."""
 

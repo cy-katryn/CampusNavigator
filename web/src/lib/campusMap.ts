@@ -8,7 +8,14 @@ import {
   zoneOf,
   type Category,
 } from './geo';
-import type { FacilityCard, Footprint, Graph, GraphEdge, GraphNode, RoutePayload } from '../types';
+import type {
+  FacilityCard,
+  Footprint,
+  Graph,
+  GraphEdge,
+  GraphNode,
+  RouteOption,
+} from '../types';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -122,8 +129,72 @@ export class CampusMap {
     this.drawGraph();
   }
 
-  setRoute(route: RoutePayload | null): void {
-    this.drawRoute(route);
+  /**
+   * Draw every candidate route at once, one colour each, with the chosen one on top
+   * and at full strength. Only the chosen route gets dots and START/GOAL labels:
+   * three sets of pins on one line is unreadable.
+   */
+  setRoutes(routes: RouteOption[], selected: number): void {
+    const layer = layerOf('layer-route');
+    if (!layer) return;
+    layer.innerHTML = '';
+    this.svg.classList.toggle('no-links', !this.showLinks);
+    if (!routes.length) return;
+
+    const chosen = Math.max(0, Math.min(selected, routes.length - 1));
+    // draw the others first so the chosen line is never buried under them
+    const order = routes
+      .map((route, index) => ({ route, index }))
+      .sort((a, b) => (a.index === chosen ? 1 : 0) - (b.index === chosen ? 1 : 0));
+
+    let chosenPoints: Point[] = [];
+    order.forEach(({ route, index }) => {
+      const isChosen = index === chosen;
+      const dots = route.path.map((p) => this.project(p.lat, p.lng));
+      // the line follows the walkway geometry the engine measured, not the dots
+      const shaped: Point[] = [];
+      route.segments.forEach((segment) => {
+        if (segment.path && segment.path.length >= 2) {
+          segment.path.forEach(([lat, lng]) => shaped.push(this.project(lat, lng)));
+        }
+      });
+      const points = shaped.length >= 2 ? shaped : dots;
+      if (isChosen) chosenPoints = dots;
+      const d = points
+        .map((p, i) => (i ? 'L' : 'M') + p.x.toFixed(2) + ' ' + p.y.toFixed(2))
+        .join(' ');
+      if (!d) return;
+
+      const colour = `var(--route-${index + 1})`;
+      const casing = el('path', { d, class: 'route-casing' });
+      const line = el('path', { d, class: 'route-line' });
+      if (isChosen) {
+        line.setAttribute('style', `stroke: ${colour}`);
+      } else {
+        casing.setAttribute('style', 'stroke-width: 3.5; opacity: .55');
+        line.setAttribute('style', `stroke: ${colour}; stroke-width: 2; opacity: .55`);
+      }
+      layer.appendChild(casing);
+      layer.appendChild(line);
+
+      if (!isChosen) return;
+      route.path.forEach((point, i) => {
+        const xy = dots[i];
+        layer.appendChild(
+          el('circle', { cx: xy.x, cy: xy.y, r: i === 0 ? 9 : 6, class: 'route-dot' }),
+        );
+        layer.appendChild(
+          el('circle', { cx: xy.x, cy: xy.y, r: i === 0 ? 4 : 3, class: 'route-pin' }),
+        );
+        if (i === 0 || i === route.path.length - 1) {
+          const label = el('text', { x: xy.x + 12, y: xy.y - 10, class: 'node-label route-label' });
+          label.textContent = (i === 0 ? 'START · ' : 'GOAL · ') + point.name;
+          layer.appendChild(label);
+        }
+      });
+    });
+
+    if (chosenPoints.length) this.fitTo(chosenPoints);
   }
 
   setFacilities(facilities: FacilityCard[]): void {
@@ -156,7 +227,7 @@ export class CampusMap {
   fitAll(): void {
     if (!this.graph) return;
     this.setupProjection();
-    this.drawRoute(null);
+    this.setRoutes([], 0);
   }
 
   zoom(factor: number, cx?: number, cy?: number): void {
@@ -573,43 +644,6 @@ export class CampusMap {
   }
 
   // -- route ---------------------------------------------------------------
-  private drawRoute(route: RoutePayload | null): void {
-    const layer = layerOf('layer-route');
-    if (!layer) return;
-    layer.innerHTML = '';
-    const navigating = Boolean(route && route.path && route.path.length >= 2);
-    // Navigating shows the route and nothing else: revealing all 343 walkway links as
-    // well would bury the one line the user has to follow.
-    this.svg.classList.toggle('no-links', !this.showLinks);
-    if (!navigating) return;
-
-    const shaped: Point[] = [];
-    (route as RoutePayload).segments.forEach((seg) => {
-      if (seg.path && seg.path.length >= 2) {
-        seg.path.forEach(([lat, lng]) => shaped.push(this.project(lat, lng)));
-      }
-    });
-    const points = (route as RoutePayload).path.map((p) => this.project(p.lat, p.lng));
-    const drawPoints = shaped.length >= 2 ? shaped : points;
-    const d = drawPoints
-      .map((p, i) => (i ? 'L' : 'M') + p.x.toFixed(2) + ' ' + p.y.toFixed(2))
-      .join(' ');
-    layer.appendChild(el('path', { d, class: 'route-casing' }));
-    layer.appendChild(el('path', { d, class: 'route-line' }));
-
-    (route as RoutePayload).path.forEach((p, i) => {
-      const xy = points[i];
-      layer.appendChild(el('circle', { cx: xy.x, cy: xy.y, r: i === 0 ? 9 : 6, class: 'route-dot' }));
-      layer.appendChild(el('circle', { cx: xy.x, cy: xy.y, r: i === 0 ? 4 : 3, class: 'route-pin' }));
-      if (i === 0 || i === (route as RoutePayload).path.length - 1) {
-        const label = el('text', { x: xy.x + 12, y: xy.y - 10, class: 'node-label route-label' });
-        label.textContent = (i === 0 ? 'START · ' : 'GOAL · ') + p.name;
-        layer.appendChild(label);
-      }
-    });
-    this.fitTo(points);
-  }
-
   private fitTo(points: Point[]): void {
     if (!points.length) return;
     const xs = points.map((p) => p.x);
