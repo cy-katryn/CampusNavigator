@@ -73,6 +73,7 @@ def search(
     algorithm: str = "astar",
     closed_edges: set[str] | None = None,
     closed_nodes: set[str] | None = None,
+    avoid_stairs: bool = False,
 ) -> RouteResult:
     """Run A* or UCS. `algorithm` is "astar" or "ucs"."""
     if start not in graph.nodes:
@@ -81,18 +82,20 @@ def search(
         raise KeyError(f"unknown goal node {goal!r}")
 
     use_heuristic = algorithm == "astar"
-    adj = graph.adjacency(closed_edges, closed_nodes)
+    adj = graph.adjacency(closed_edges, closed_nodes, avoid_stairs=avoid_stairs)
     blocked = {
         "closed_edges": sorted(closed_edges or ()),
         "closed_nodes": sorted(closed_nodes or ()),
     }
 
+    active = {"avoid_stairs": True} if avoid_stairs else {}
+    blocked.update(active)
     started = time.perf_counter()
     stats = Stats(algorithm=algorithm, heuristic="euclidean" if use_heuristic else "zero")
 
     if start == goal:
         stats.elapsed_ms = (time.perf_counter() - started) * 1000
-        return RouteResult(True, algorithm, [start], 0.0, [], stats, [])
+        return RouteResult(True, algorithm, [start], 0.0, [], stats, [], active)
 
     g_cost: dict[str, float] = {start: 0.0}
     parent: dict[str, tuple[str, Edge]] = {}
@@ -133,7 +136,7 @@ def search(
                         u=cur,
                         v=nxt,
                         metres=edge.metres,
-                        path=edge.path,
+                        path=edge.path if cur == edge.u else edge.path[::-1],
                         stairs=edge.stairs,
                         covered=edge.covered,
                     )
@@ -141,7 +144,7 @@ def search(
                 total += edge.metres
                 cur = nxt
             stats.elapsed_ms = (time.perf_counter() - started) * 1000
-            return RouteResult(True, algorithm, [start] + [n for n, _ in steps], total, segments, stats, explain)
+            return RouteResult(True, algorithm, [start] + [n for n, _ in steps], total, segments, stats, explain, active)
 
         for neighbour, weight, edge in adj.get(node, ()):
             if neighbour in closed:
@@ -177,6 +180,7 @@ def compare(graph: CampusGraph, start: str, goal: str, **kwargs) -> dict:
         "constraints": {
             "closed_edges": sorted(kwargs.get("closed_edges") or ()),
             "closed_nodes": sorted(kwargs.get("closed_nodes") or ()),
+            "avoid_stairs": bool(kwargs.get("avoid_stairs")),
         },
         "astar": {
             "reachable": a.reachable,

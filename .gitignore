@@ -17,6 +17,7 @@ logs/
 *.log
 cache/
 llm_cache.json
+.voice/
 
 # --- os / editor ---------------------------------------------------------
 .DS_Store

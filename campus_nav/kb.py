@@ -253,6 +253,7 @@ class KnowledgeBase:
                         fields={
                             "category": rec.get("category", ""),
                             "name_zh": names.get("zh_HK", ""),
+                            "name_zh_cn": names.get("zh_CN", ""),
                             "address": address,
                             "opening_hours": rec.get("opening_hours") or {},
                             "lat": rec.get("lat"),

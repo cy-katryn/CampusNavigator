@@ -22,10 +22,7 @@ const state = {
   nodes: new Map(),
   view: { x: 0, y: 0, w: 800, h: 600 },
   bounds: null,
-  speaking: false,
-  listening: false,
   voiceOn: true,
-  voice: null,
   basemap: true,            // street tiles underneath (off = plain diagram)
   showLinks: false,         // the walkway network is scaffolding, hidden by default
   showDoors: false,         // 24 doorways is a lot of markers; off until asked for
@@ -56,6 +53,16 @@ const AVATAR_LABELS = {
   error: 'no connection',
 };
 let avatarRecover = null;
+let recognition = null;
+let micStarted = false;
+let localSpeechReady = false;
+let utterance = null;
+let lastReply = null;
+let pendingChat = null;
+let resetting = false;
+const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const synthesis = window.speechSynthesis;
+const voiceDraft = new VoiceRouteDraft($('voice-route-draft'), () => state.graph, () => $('lang').value, updateVoiceControls);
 
 function setAvatar(mode) {
   const next = AVATAR_STATES.indexOf(mode) === -1 ? 'idle' : mode;
@@ -65,12 +72,23 @@ function setAvatar(mode) {
   avatarState.textContent = AVATAR_LABELS[next];
   if (next === 'error') {
     // a dropped connection is a flash, not a home: come back on our own
-    avatarRecover = setTimeout(() => setAvatar(state.speaking ? 'speaking' : 'idle'), 2600);
+    avatarRecover = setTimeout(refreshAvatar, 2600);
   }
 }
 
+function refreshAvatar() {
+  if (micStarted) setAvatar('listening');
+  else if (utterance && synthesis.speaking) setAvatar('speaking');
+  else if (pendingChat || resetting || recognition?.phase === 'transcribing') setAvatar('thinking');
+  else setAvatar('idle');
+}
+
 /* -------------------------------------------------------------------- chat */
-function addMessage(role, payload) {
+function segmentCountLabel(count) {
+  return count + (count === 1 ? ' segment' : ' segments');
+}
+
+function addMessage(role, payload, lang = 'en-US') {
   const wrap = document.createElement('div');
   wrap.className = 'msg ' + role;
   const who = document.createElement('div');
@@ -105,7 +123,7 @@ function addMessage(role, payload) {
       const route = payload.route;
       const bits = [];
       if (route && route.reachable) {
-        bits.push(route.segments.length + ' legs');
+        bits.push(segmentCountLabel(route.segments.length));
         if (route.stats) bits.push(route.stats.algorithm.toUpperCase() + ' expanded ' +
           route.stats.nodes_expanded + ' nodes, ' + route.stats.ms + ' ms');
       }
@@ -135,14 +153,23 @@ function addMessage(role, payload) {
       payload.facilities.forEach((f) => {
         const card = document.createElement('div');
         card.className = 'card';
-        const where = [f.building, f.floor].filter(Boolean).join(', ');
+        const chinese = lang === 'zh-HK' || lang === 'zh-CN';
+        const name = f.display_name || f.name;
+        const where = [f.display_building || f.building, f.display_floor || f.floor]
+          .filter(Boolean).join(chinese ? ' · ' : ', ');
         const bits = [];
         if (where) bits.push(where);
-        if (f.metres != null) bits.push(f.metres + ' m');
-        if (f.hours_today) bits.push((f.open_now === false ? 'closed · ' : 'open · ') + f.hours_today);
-        card.innerHTML = '<b>' + escapeHtml(f.name) + '</b>' +
+        if (f.metres != null) bits.push(f.metres + (chinese ? ' 米' : ' m'));
+        const hours = f.display_hours || f.hours_today;
+        if (hours) {
+          const open = lang === 'zh-HK' ? '開放中' : chinese ? '开放中' : 'open';
+          const closed = lang === 'zh-HK' ? '未開放' : chinese ? '未开放' : 'closed';
+          const status = typeof f.open_now === 'boolean' ? (f.open_now ? open : closed) : '';
+          bits.push(status && f.hours_today?.toLowerCase() !== 'closed' ? status + ' · ' + hours : hours);
+        }
+        card.innerHTML = '<b>' + escapeHtml(name) + '</b>' +
           (bits.length ? '<div class="meta">' + escapeHtml(bits.join(' · ')) + '</div>' : '');
-        card.title = 'Ask for a route to ' + f.name;
+        card.title = chinese ? '前往' + name : 'Ask for a route to ' + name;
         card.addEventListener('click', () => send('how do I get to ' + f.name + '?'));
         cards.appendChild(card);
       });
@@ -164,32 +191,45 @@ function escapeHtml(value) {
   return div.innerHTML;
 }
 
-async function send(text) {
+async function send(text, endpoints = {}, confirmedRoute = '') {
   text = (text || '').trim();
-  if (!text) return;
-  addMessage('user', text);
+  if (!text || pendingChat || resetting) return;
+  cancelRecognition();
+  voiceDraft.reset();
+  stopSpeech();
+  lastReply = null;
+  $('voice-hint').textContent = voiceAvailabilityHint();
+  const lang = $('lang').value;
+  addMessage('user', confirmedRoute ? text + '\n' + confirmedRoute : text);
   $('input').value = '';
   setAvatar('thinking');
   try {
-    const res = await fetch('/api/chat', {
+    pendingChat = fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    });
-    const payload = await res.json();
+      body: JSON.stringify(Object.keys(endpoints).length ? { text, lang, endpoints } : { text, lang }),
+    }).then((res) => res.json());
+    updateVoiceControls();
+    const payload = await pendingChat;
+    if (resetting) return;
     if (payload.error) {
       addMessage('bot', { text: 'Server error: ' + payload.error, notes: [], facilities: [] });
       setAvatar('idle');
       return;
     }
-    addMessage('bot', payload);
+    addMessage('bot', payload, lang);
     drawRoute(payload.route);
     drawFacilities(payload.facilities);
-    speak(payload.speech);
+    lastReply = payload.speech ? { text: payload.speech, lang: payload.speech_lang || 'en-US' } : null;
+    if (state.voiceOn && lastReply) playReply();
   } catch (err) {
+    if (resetting) return;
     addMessage('bot', { text: 'Could not reach the engine: ' + err, notes: [], facilities: [] });
-    // the one thing the face knows that the text does not: the engine is gone
     setAvatar('error');
+  } finally {
+    pendingChat = null;
+    updateVoiceControls();
+    if (!avatar.classList.contains('error')) refreshAvatar();
   }
 }
 
@@ -631,6 +671,9 @@ function drawGraph() {
 
     g.addEventListener('click', (ev) => {
       ev.stopPropagation();
+      cancelRecognition();
+      voiceDraft.reset();
+      updateVoiceControls();
       $('input').value = 'how do I get to ' + n.name + '?';
       $('input').focus();
     });
@@ -658,6 +701,14 @@ function drawRoute(route) {
   const badge = $('route-badge');
   layer.innerHTML = '';
   if (badge) badge.hidden = true;
+  if (route && !route.reachable) {
+    if (badge) {
+      badge.hidden = false;
+      badge.classList.add('failed');
+      badge.textContent = route.avoid_stairs ? 'No route avoiding mapped stairs' : 'No route under these restrictions';
+    }
+    return;
+  }
   const navigating = Boolean(route && route.path && route.path.length >= 2);
   // Navigating shows the route and nothing else: revealing all 370 walkway links as
   // well would bury the one line the user actually has to follow. The network stays
@@ -667,10 +718,8 @@ function drawRoute(route) {
 
   if (badge) {
     badge.hidden = false;
-    badge.textContent = route.reachable
-      ? Math.round(route.metres) + ' m · ' + route.segments.length + ' legs'
-      : 'no route with those closures';
-    badge.classList.toggle('failed', !route.reachable);
+    badge.textContent = Math.round(route.metres) + ' m · ' + segmentCountLabel(route.segments.length);
+    badge.classList.remove('failed');
   }
   const shaped = [];
   (route.segments || []).forEach((seg) => {
@@ -724,77 +773,191 @@ function fitTo(points) {
 }
 
 /* ------------------------------------------------------- speech: synthesis */
-function pickVoice() {
-  const select = $('lang');
-  const wanted = (select && select.value) || 'en-US';
-  const voices = window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
-  return voices.find((v) => v.lang === wanted) ||
-         voices.find((v) => v.lang && v.lang.slice(0, 2) === wanted.slice(0, 2)) ||
-         voices.find((v) => /^en/i.test(v.lang)) || null;
+const speechLanguages = {
+  'en-US': 'English',
+  'zh-HK': 'Cantonese',
+  'zh-CN': 'Mandarin',
+};
+
+function pickVoice(lang) {
+  // Voices can use legacy tags with underscores and optional script subtags.
+  const voices = synthesis.getVoices();
+  const tag = (voice) => voice.lang.replace(/_/g, '-').toLowerCase();
+  const compatible = {
+    'zh-HK': /^(yue(?:-|$)|zh-(?:hant-)?hk$)/,
+    'zh-CN': /^(cmn(?:-|$)|zh-(?:hans(?:-|$)|cn$|tw$|sg$))/,
+    'en-US': /^en(?:-|$)/,
+  }[lang];
+  // An installed voice in the requested language can play without a network service.
+  for (const pool of [voices.filter((v) => v.localService), voices]) {
+    const voice = pool.find((v) => tag(v) === lang.toLowerCase()) ||
+      (compatible && pool.find((v) => compatible.test(tag(v))));
+    if (voice) return voice;
+  }
+  return null;
 }
 
-function speak(text) {
-  if (!state.voiceOn || !text || !window.speechSynthesis) {
-    // nothing is going to be said -- do not leave the face stuck on "thinking"
-    setAvatar(state.listening ? 'listening' : 'idle');
+function voiceAvailabilityHint() {
+  const notes = [];
+  if (localSpeechReady) notes.push('Offline speech ready.');
+  else if (!Recognition) notes.push('Speech input is unavailable here. Type your question.');
+  if (!synthesis) notes.push('Spoken replies are unavailable here.');
+  return notes.join(' ');
+}
+
+function updateVoiceControls() {
+  const busy = Boolean(pendingChat || resetting);
+  $('send').disabled = busy || Boolean(recognition) || voiceDraft.blocked;
+  $('reset').disabled = resetting;
+  $('mic').disabled = (!localSpeechReady && !Recognition) || busy;
+  $('mic').classList.toggle('recording', micStarted);
+  $('mic').setAttribute('aria-pressed', String(Boolean(recognition)));
+  const canCancel = recognition?.phase === 'opening' || recognition?.phase === 'transcribing';
+  $('mic-label').textContent = recognition ? (canCancel ? 'Cancel' : 'Finish') : 'Speak';
+  $('lang').disabled = Boolean(recognition);
+  $('speaker').disabled = !synthesis;
+  $('speaker').classList.toggle('on', state.voiceOn && Boolean(synthesis));
+  $('speaker').setAttribute('aria-pressed', String(state.voiceOn && Boolean(synthesis)));
+  const replay = $('replay');
+  replay.disabled = !synthesis || !lastReply || Boolean(recognition) || busy;
+  replay.textContent = utterance ? 'Stop' : 'Replay';
+  replay.title = utterance ? 'Stop reading' : 'Replay the latest reply';
+}
+
+function stopSpeech() {
+  if (!utterance) return;
+  utterance = null; // Late callbacks belong to the cancelled utterance.
+  synthesis.cancel();
+  updateVoiceControls();
+  refreshAvatar();
+}
+
+function playReply() {
+  if (!synthesis || !lastReply || recognition) return;
+  stopSpeech();
+  const { text, lang } = lastReply;
+  const voice = pickVoice(lang);
+  if (!voice) {
+    $('voice-hint').textContent = 'No ' + (speechLanguages[lang] || lang) +
+      ' voice is available. Read the reply on screen or enable a matching system voice and replay.';
     return;
   }
-  window.speechSynthesis.cancel();
-  const utter = new SpeechSynthesisUtterance(text);
-  const voice = pickVoice();
-  if (voice) utter.voice = voice;
-  utter.rate = 1.0;
-  utter.pitch = 1.0;
-  utter.onstart = () => { state.speaking = true; setAvatar('speaking'); };
-  utter.onend = () => { state.speaking = false; setAvatar(state.listening ? 'listening' : 'idle'); };
-  utter.onerror = () => { state.speaking = false; setAvatar('idle'); };
-  window.speechSynthesis.speak(utter);
+  const next = new SpeechSynthesisUtterance(text);
+  next.voice = voice;
+  next.lang = lang;
+  utterance = next;
+  $('voice-hint').textContent = voiceAvailabilityHint();
+  updateVoiceControls();
+  next.onstart = () => { if (utterance === next) refreshAvatar(); };
+  function finish() {
+    if (utterance !== next) return;
+    utterance = null;
+    updateVoiceControls();
+    refreshAvatar();
+  }
+  next.onend = finish;
+  next.onerror = () => {
+    if (utterance !== next) return;
+    $('voice-hint').textContent = 'Playback stopped. Select Replay to try again.';
+    finish();
+  };
+  try {
+    synthesis.speak(next);
+  } catch {
+    next.onerror();
+  }
 }
 
 /* ---------------------------------------------------- speech: recognition */
-function setupRecognition() {
-  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!Recognition) {
-    $('mic').disabled = true;
-    $('voice-hint').textContent =
-      'Speech input needs a browser with the Web Speech API (Chrome or Edge). ' +
-      'Text input and spoken replies still work.';
+function cancelRecognition() {
+  if (!recognition) return;
+  const previous = recognition;
+  recognition = null; // Discard results arriving after Send, Reset or a manual edit.
+  micStarted = false;
+  previous.abort();
+  updateVoiceControls();
+  refreshAvatar();
+}
+
+function toggleRecognition() {
+  if (recognition) {
+    if (recognition.phase === 'opening' || recognition.phase === 'transcribing') {
+      cancelRecognition();
+      $('voice-hint').textContent = 'Voice input cancelled.';
+    } else {
+      recognition.stop(); // Allow the engine to deliver its last result.
+    }
     return;
   }
-  const rec = new Recognition();
+  if ((!localSpeechReady && !Recognition) || pendingChat || resetting) return;
+  stopSpeech();
+  voiceDraft.reset();
+  const rec = localSpeechReady ? new LocalSpeechInput() : new Recognition();
+  const input = $('input');
+  const draft = input.value.trimEnd();
+  const hint = $('voice-hint');
   rec.lang = $('lang').value;
   rec.interimResults = true;
   rec.continuous = false;
-
+  let receivedText = false;
+  let failed = false;
   rec.onstart = () => {
-    state.listening = true;
-    $('mic').classList.add('recording');
-    setAvatar('listening');
+    if (recognition !== rec) return;
+    micStarted = true;
+    hint.textContent = 'Listening. Select Finish when you are done.';
+    updateVoiceControls();
+    refreshAvatar();
+  };
+  rec.onprocessing = () => {
+    if (recognition !== rec) return;
+    micStarted = false;
+    hint.textContent = 'Transcribing your question…';
+    updateVoiceControls();
+    refreshAvatar();
   };
   rec.onresult = (event) => {
-    let interim = '';
-    let final = '';
-    for (let i = event.resultIndex; i < event.results.length; i += 1) {
-      const chunk = event.results[i][0].transcript;
-      if (event.results[i].isFinal) final += chunk;
-      else interim += chunk;
-    }
-    $('input').value = final || interim;
-    if (final) {
-      rec.stop();
-      send(final);
-    }
+    if (recognition !== rec) return;
+    const text = Array.from(event.results, (result) => result[0].transcript.trim())
+      .filter(Boolean).join(' ');
+    input.value = [draft, text].filter(Boolean).join(' ');
+    receivedText = Boolean(text);
   };
   rec.onerror = (event) => {
-    $('voice-hint').textContent = 'Microphone error: ' + event.error +
-      (event.error === 'not-allowed' ? ' (allow microphone access in the browser)' : '');
+    if (recognition !== rec) return;
+    failed = true;
+    const messages = {
+      'not-allowed': 'Allow microphone access in your browser or type your question.',
+      'service-not-allowed': 'Speech input is blocked in this browser. Type your question.',
+      'no-speech': 'No speech detected. Try Speak again or type your question.',
+      'audio-capture': 'No microphone available. Connect one or type your question.',
+      'network': 'The browser speech service could not connect. Retry or type your question.',
+      'local-transcription': event.detail || 'The local transcriber could not finish. Retry or type your question.',
+      'language-not-supported': 'Speech input is unavailable for this language. Type your question.',
+    };
+    hint.textContent = messages[event.error] || 'Speech input stopped. Retry or type your question.';
   };
-  rec.onend = () => {
-    state.listening = false;
-    $('mic').classList.remove('recording');
-    if (!state.speaking) setAvatar('idle');
-  };
-  return rec;
+  function finish() {
+    if (recognition !== rec) return;
+    recognition = null;
+    micStarted = false;
+    if (!failed) hint.textContent = receivedText ? 'Review your question, then select Send.' :
+      'No speech detected. Try Speak again or type your question.';
+    if (!failed && receivedText) voiceDraft.preview(input.value);
+    updateVoiceControls();
+    refreshAvatar();
+  }
+  rec.onend = finish;
+  recognition = rec;
+  hint.textContent = 'Opening microphone…';
+  updateVoiceControls();
+  refreshAvatar();
+  try {
+    rec.start();
+  } catch {
+    failed = true;
+    hint.textContent = 'Could not start the microphone. Check browser permissions or type your question.';
+    finish();
+  }
 }
 
 /* ---------------------------------------------------------------- map search */
@@ -927,7 +1090,7 @@ function refreshStatus(status) {
   const connected = Boolean(status.model);
   pill.textContent = connected
     ? 'model: ' + status.model.split('/').pop().replace(':free', '')
-    : 'no model connected';
+    : 'no chat model connected';
   pill.className = 'pill ' + (connected ? 'ok' : 'warn');
   pill.title = connected
     ? status.mode + '\nkey: present'
@@ -1019,24 +1182,34 @@ async function boot() {
     facilities: [],
   });
 
-  const rec = setupRecognition();
-  const mic = $('mic');
-  mic.addEventListener('click', () => {
-    if (!rec) return;
-    window.speechSynthesis && window.speechSynthesis.cancel();
-    rec.lang = $('lang').value;
-    try { rec.start(); } catch (err) { /* already running */ }
-  });
+  if (LocalSpeechInput.supported()) {
+    try {
+      const res = await fetch('/api/speech-status');
+      if (res.ok) localSpeechReady = (await res.json()).available === true;
+    } catch { /* Browser recognition remains available when the local engine is offline. */ }
+  }
+  updateVoiceControls();
+  if (synthesis) synthesis.getVoices(); // Some browsers populate voices asynchronously.
+  $('voice-hint').textContent = voiceAvailabilityHint();
 
-  $('speaker').addEventListener('click', (ev) => {
+  $('mic').addEventListener('click', toggleRecognition);
+  $('input').addEventListener('input', () => {
+    cancelRecognition();
+    if (voiceDraft.active) voiceDraft.preview($('input').value, 200, true);
+  });
+  $('lang').addEventListener('change', () => {
+    if (voiceDraft.active) voiceDraft.preview($('input').value, 0, true);
+  });
+  $('replay').addEventListener('click', () => utterance ? stopSpeech() : playReply());
+  $('speaker').addEventListener('click', () => {
     state.voiceOn = !state.voiceOn;
-    ev.currentTarget.classList.toggle('on', state.voiceOn);
-    if (!state.voiceOn && window.speechSynthesis) window.speechSynthesis.cancel();
+    if (!state.voiceOn) stopSpeech();
+    updateVoiceControls();
   });
 
   $('composer').addEventListener('submit', (ev) => {
     ev.preventDefault();
-    send($('input').value);
+    if (!$('send').disabled) send($('input').value, voiceDraft.endpoints, voiceDraft.confirmedRoute);
   });
 
   // legend chips hide a whole facility category, like a layer toggle on a map site
@@ -1108,14 +1281,32 @@ async function boot() {
   });
 
   $('reset').addEventListener('click', async () => {
-    await fetch('/api/reset', { method: 'POST' });
-    $('chat').innerHTML = '';
-    $('layer-route').innerHTML = '';
-    $('layer-facilities').innerHTML = '';
-    $('map').classList.toggle('no-links', !state.showLinks);
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
-    setAvatar('idle');
-    addMessage('bot', { text: 'Conversation cleared. Where would you like to go?', notes: [], facilities: [] });
+    if (resetting) return;
+    resetting = true;
+    voiceDraft.reset();
+    cancelRecognition();
+    stopSpeech();
+    updateVoiceControls();
+    refreshAvatar();
+    try {
+      // Let a request already sent finish before resetting server dialogue state.
+      if (pendingChat) await pendingChat.catch(() => {});
+      const res = await fetch('/api/reset', { method: 'POST' });
+      if (!res.ok) throw new Error('Reset failed');
+      lastReply = null;
+      $('input').value = '';
+      $('voice-hint').textContent = voiceAvailabilityHint();
+      $('chat').innerHTML = '';
+      drawRoute(null);
+      drawFacilities([]);
+      addMessage('bot', { text: 'Conversation cleared. Where would you like to go?', notes: [], facilities: [] });
+    } catch {
+      $('voice-hint').textContent = 'Could not reset the conversation. Please try again.';
+    } finally {
+      resetting = false;
+      updateVoiceControls();
+      refreshAvatar();
+    }
   });
 
   // pan
@@ -1150,9 +1341,6 @@ async function boot() {
     if (state.graph) { setupProjection(state.graph.nodes); drawRoute(null); }
   });
 
-  if (window.speechSynthesis) {
-    window.speechSynthesis.onvoiceschanged = () => { state.voice = pickVoice(); };
-  }
 }
 
 boot();

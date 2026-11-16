@@ -15,7 +15,7 @@ python -m campus_nav.web --open      # web app  ->  http://127.0.0.1:8000
 python -m campus_nav.cli --demo      # the same three turns in a terminal
 ```
 
-Python 3.10+. The standard library only — nothing to install, no build step, no network.
+Python 3.10+. The local route engine uses only the standard library and runs offline.
 
 Without an API key the app runs on its grammar parser and template replies, which is the
 mode to fall back on if the demo Wi-Fi fails. With a key in `.env` (see `.env.example`) the
@@ -47,6 +47,46 @@ you> how do I get from the main entrance to the library?
 bot> Route: Main Entrance -> Pao Yue-kong Library
      Total: 230 m over 1 leg, 2 flights of steps
 ```
+
+**Voice** — Select English, Cantonese or Mandarin, then press **Speak**. Try
+“From Core D to Block Z”, “由 Core D 去 Block Z 點行？” or “从 Core D 到 Block Z 怎么走？”.
+Review the transcript and the two place fields. To correct either endpoint, type its
+name and select the campus place you mean. Press **Send** to request the route with
+your original restrictions. For Cantonese or Mandarin, the navigator reads campus
+place names, facility results and published hours in the selected language when available.
+**Auto-read** controls automatic playback, and **Replay** repeats the latest reply.
+When local speech recognition is installed, **Speak** records on the web page and
+transcribes on the machine running the navigator. The recording limit is 30 seconds.
+The local model uses the Cantonese language token (`yue`) for Cantonese, `zh` for
+Mandarin and `en` for English. Campus names and mixed-language speech may need correction. With local recognition unavailable,
+the page can use the browser's speech service if supported. That service may require
+internet access. Playback needs a matching system voice; use an installed local voice
+for offline playback.
+
+### Install local speech recognition
+
+Run the following once on the machine that hosts the navigator. You need Python 3.10+,
+Git, CMake, a C/C++ compiler and curl. On macOS, install Xcode Command Line Tools and
+CMake; on Windows, install Visual Studio Build Tools with the Desktop C++ workload.
+Setup downloads the pinned whisper.cpp source and a roughly 574 MB model, verifies
+the model's SHA-256 and builds the CLI locally. Subsequent local transcription runs
+without an API key or internet connection.
+
+```bash
+python tools/setup_voice.py
+python -m campus_nav.web --open
+```
+
+If you already have the multilingual model, use
+`python tools/setup_voice.py --model-file /path/to/ggml-large-v3-turbo-q5_0.bin`.
+The installer places the executable under `.voice/bin/` and the model under
+`.voice/models/`. These files are local to each checkout. To use an existing
+installation, set `WHISPER_CLI` and `WHISPER_MODEL` to the corresponding paths
+before starting the server. Open the app on localhost (or HTTPS) and allow microphone
+access. The local engine is detected when the page loads.
+
+Setup uses [whisper.cpp v1.8.2](https://github.com/ggml-org/whisper.cpp/tree/4979e04f5dcaccb36057e059bbaed8a2f5288315)
+and the [quantized multilingual Whisper large-v3-turbo model](https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin).
 
 ## Data
 
@@ -80,7 +120,8 @@ than inventing a route. To change the map: edit a GeoJSON in `data/authored/`, r
 |---|---|
 | `campus_nav/` | the application: graph, A*/UCS search, dialogue, NLU, knowledge base, web server |
 | `campus_nav/static/` | the interface — HTML, CSS, one JavaScript file, no framework |
-| `tools/build.py` | the only tool: build, audit, gaps, name report |
+| `tools/build.py` | build and audit the map, report gaps and names |
+| `tools/setup_voice.py` | install the local speech recognizer and model |
 | `data/raw_data/` | what Overpass and the PolyU sites published, untouched |
 | `data/authored/` | the GeoJSON you draw and edit |
 | `tests/` | 91 unittest-style tests, no network |

@@ -196,18 +196,14 @@ class CampusGraph:
         self,
         closed_edges: set[str] | None = None,
         closed_nodes: set[str] | None = None,
+        *, avoid_stairs: bool = False,
     ) -> list[Edge]:
-        """Filter first, then search -- exactly as the plan specifies.
-
-        The only constraint a link can carry is whether it is currently open. A
-        closure is reported by the user ("the link between C and D is closed"), so
-        it is a runtime fact rather than an attribute we had to invent.
-        """
+        """Exclude closures and, when requested, all links marked as stairs."""
         closed_edges = closed_edges or set()
         closed_nodes = closed_nodes or set()
         out = []
         for e in self.edges:
-            if not e.open or e.id in closed_edges:
+            if not e.open or e.id in closed_edges or (avoid_stairs and e.stairs):
                 continue
             if (e.u in closed_nodes) or (e.v in closed_nodes):
                 continue
@@ -218,9 +214,10 @@ class CampusGraph:
         self,
         closed_edges: set[str] | None = None,
         closed_nodes: set[str] | None = None,
+        *, avoid_stairs: bool = False,
     ) -> dict[str, list[tuple[str, float, Edge]]]:
         adj: dict[str, list[tuple[str, float, Edge]]] = {n: [] for n in self.nodes}
-        for e in self.usable_edges(closed_edges, closed_nodes):
+        for e in self.usable_edges(closed_edges, closed_nodes, avoid_stairs=avoid_stairs):
             adj[e.u].append((e.v, e.metres, e))
             adj[e.v].append((e.u, e.metres, e))
         return adj
