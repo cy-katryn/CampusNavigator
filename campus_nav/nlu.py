@@ -86,11 +86,11 @@ def _place_catalogue(graph: CampusGraph, limit: int = 90) -> str:
     """
     buildings = [
         n for n in graph.nodes.values()
-        if n.kind not in ("service", "waypoint") and n.name
+        if n.kind not in ("facility", "waypoint") and n.name
     ]
     representatives: dict[str, object] = {}
     for node in graph.nodes.values():
-        if node.kind == "service" and node.service not in representatives:
+        if node.kind == "facility" and node.service not in representatives:
             representatives[node.service] = node
 
     rows = []

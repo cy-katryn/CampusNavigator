@@ -87,11 +87,11 @@ OSM_SERVICE = {
 }
 
 CAMPUS_ROLES = {
-    "faculties, schools & departments": ("service", "Faculty / Department"),
-    "administrative & supporting office": ("service", "Office"),
+    "faculties, schools & departments": ("facility", "Faculty / Department"),
+    "administrative & supporting office": ("facility", "Office"),
     "main locations": ("place", ""),
-    "public transport": ("service", "Bus Stop"),
-    "amenities": ("service", ""),
+    "public transport": ("facility", "Bus Stop"),
+    "amenities": ("facility", ""),
     # A block is a place you can ask for by name ("Block Y (Lee Shau Kee Building)"),
     # and 45 of these 52 anchors sit exactly on a drawn path vertex, so they are ordinary
     # destinations. "place" rather than "building": the map already draws the polygon.
@@ -164,17 +164,22 @@ def place_from_feature(feature: dict) -> dict:
     lat, lng = round(float(lat), 6), round(float(lng), 6)
     entrance = str(props.get("entrance") or "")
     service = str(props.get("service") or "") or osm_service(props)
-    campus = CAMPUS_ROLES.get(str(props.get("kind") or "").strip().lower())
+    published = str(props.get("kind") or "").strip()
+    campus = CAMPUS_ROLES.get(published.lower())
+    category = ""
     if campus:
-        # campus-map vocabulary: the kind is the role, the amenities field the label
+        # campus-map vocabulary: the kind is the role, the amenities field the label.
+        # The published category is kept as its own field: it is the map's own
+        # taxonomy, and the legend groups by it with the amenity as its subtype.
         kind = campus[0]
+        category = published
         service = str(props.get("amenities") or "").strip().title() or campus[1]
     elif props.get("kind"):
         kind = str(props["kind"])
     elif entrance:
         kind = "entrance"
     elif service:
-        kind = "service"
+        kind = "facility"
     else:
         kind = "place"
     name = osm_name(props)
@@ -203,6 +208,7 @@ def place_from_feature(feature: dict) -> dict:
         "lat": lat,
         "lng": lng,
         "kind": kind,
+        "category": category,
         "building": str(props.get("building") or ""),
         "parent": str(props.get("parent") or ""),
         "floor": str(props.get("level") or props.get("floor") or ""),
@@ -518,7 +524,7 @@ def build_graph(node_features: list[dict], path_features: list[dict],
         # walking to the building and going in. Giving it its own hop would draw a
         # straight line through a wall and invent a distance nobody has surveyed.
         # Doorways are exempt -- a doorway IS the threshold you walk up to.
-        if place.get("parent") and place["kind"] in ("service", "place"):
+        if place.get("parent") and place["kind"] in ("facility", "place"):
             indoor.append(place)
             continue
         best, best_d = min(

@@ -290,7 +290,7 @@ class TestLlmSlots(unittest.TestCase):
         lines = _place_catalogue(self.graph).splitlines()
         buildings = [
             n for n in self.graph.nodes.values()
-            if n.kind not in ("service", "waypoint") and n.name
+            if n.kind not in ("facility", "waypoint") and n.name
         ]
         self.assertLessEqual(len(buildings), len(lines))
         self.assertLess(len(lines), len(self.graph.nodes), "the catalogue must stay shorter than the map")

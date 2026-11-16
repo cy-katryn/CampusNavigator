@@ -33,27 +33,103 @@ export function shortCode(name: string): string {
   return alnum.slice(0, 2).toUpperCase() || '·';
 }
 
-export type Category = 'recycle' | 'water' | 'toilet' | 'aed' | 'food' | 'service';
+/* ------------------------------------------------------------------- legend
+ *
+ * The legend is the PolyU campus map's OWN taxonomy, not a shape invented for this
+ * map: every place is published under one of six categories, and a place filed under
+ * "Amenities" also carries the amenity it is (a toilet, a water station, an AED).
+ * So the legend sorts by category, and lists the amenity subtypes under Amenities.
+ *
+ * One key per chip. The key colours the pin, filters the layer, and labels the chip,
+ * so an amenity that is added to the source appears in exactly one place in the code.
+ */
+export interface LegendEntry {
+  key: string;
+  label: string;
+}
 
-export const ALL_CATEGORIES: Category[] = ['recycle', 'water', 'toilet', 'aed', 'food', 'service'];
+export interface LegendSection {
+  id: string;
+  label: string;
+  entries: LegendEntry[];
+}
 
-/** Which legend colour a facility belongs to, from the service label the engine sends. */
-export function categoryOf(node: GraphNode): Category {
-  const s = (node.service || '').toLowerCase();
-  if (s.includes('toilet')) return 'toilet';
-  if (s.includes('water')) return 'water';
-  if (s === 'aed') return 'aed';
-  if (
-    s.includes('recycl') ||
-    s.includes('unire') ||
-    s.includes('battery') ||
-    s.includes('glass') ||
-    s.includes('weee') ||
-    s.includes('vending') ||
-    s.includes('food waste')
-  ) {
-    return 'recycle';
-  }
-  if (s.includes('canteen')) return 'food';
-  return 'service';
+export const LEGEND: LegendSection[] = [
+  {
+    id: 'places',
+    label: 'Places',
+    entries: [
+      { key: 'buildings', label: 'blocks & buildings' },
+      { key: 'locations', label: 'main locations' },
+    ],
+  },
+  {
+    id: 'departments',
+    label: 'Departments',
+    entries: [
+      { key: 'faculties', label: 'faculties & schools' },
+      { key: 'offices', label: 'administrative offices' },
+      { key: 'transport', label: 'public transport' },
+    ],
+  },
+  {
+    id: 'amenities',
+    label: 'Amenities',
+    entries: [
+      { key: 'amenity-lecture-theatre', label: 'lecture theatre' },
+      { key: 'amenity-aed', label: 'AED' },
+      { key: 'amenity-water', label: 'water station' },
+      { key: 'amenity-toilet', label: 'toilet' },
+      { key: 'amenity-accessible-toilet', label: 'accessible toilet' },
+      { key: 'amenity-catering', label: 'catering outlet' },
+      { key: 'amenity-clinic', label: 'clinic' },
+      { key: 'amenity-lactation', label: 'lactation room' },
+      { key: 'amenity-prayer', label: 'prayer room' },
+      { key: 'amenity-other', label: 'other amenity' },
+    ],
+  },
+];
+
+/** Every chip, in the order the legend draws them. */
+export const ALL_LEGEND_KEYS: string[] = LEGEND.flatMap((section) =>
+  section.entries.map((entry) => entry.key),
+);
+
+const CATEGORY_KEY: Record<string, string> = {
+  'buildings / cores / wings / blocks': 'buildings',
+  'main locations': 'locations',
+  'faculties, schools & departments': 'faculties',
+  'administrative & supporting office': 'offices',
+  'public transport': 'transport',
+};
+
+/** The amenity subtype, from the service label the engine sends. */
+function amenityKey(service: string): string {
+  const s = service.toLowerCase();
+  if (s.includes('accessible') && s.includes('toilet')) return 'amenity-accessible-toilet';
+  if (s.includes('toilet')) return 'amenity-toilet';
+  if (s.includes('water')) return 'amenity-water';
+  if (s.includes('aed') || s.includes('defibrillator')) return 'amenity-aed';
+  if (s.includes('catering') || s.includes('canteen') || s.includes('cafe')) return 'amenity-catering';
+  if (s.includes('lecture')) return 'amenity-lecture-theatre';
+  if (s.includes('clinic')) return 'amenity-clinic';
+  if (s.includes('lactation') || s.includes('nursing')) return 'amenity-lactation';
+  if (s.includes('prayer')) return 'amenity-prayer';
+  return 'amenity-other';
+}
+
+/**
+ * Which chip a node belongs to.
+ *
+ * The published category decides, and only "Amenities" is split further by the service
+ * label. A graph built before the category was stored falls back to the service alone,
+ * so an older campus_graph.json still colours and filters sensibly.
+ */
+export function legendKeyOf(node: GraphNode): string {
+  const category = (node.category || '').toLowerCase().trim();
+  const direct = CATEGORY_KEY[category];
+  if (direct) return direct;
+  if (category.startsWith('amenities')) return amenityKey(node.service || '');
+  if (node.kind === 'place') return 'locations';
+  return amenityKey(node.service || '');
 }

@@ -1,4 +1,5 @@
-export type NodeKind = 'building' | 'place' | 'entrance' | 'service' | 'waypoint';
+/** The role a node plays in the graph -- not how the campus map files it (see category). */
+export type NodeKind = 'place' | 'facility' | 'entrance' | 'waypoint';
 
 export interface GraphNode {
   id: string;
@@ -6,6 +7,8 @@ export interface GraphNode {
   lat: number;
   lng: number;
   kind: NodeKind;
+  /** The campus map's own category, e.g. "Amenities" or "Main Locations". */
+  category?: string;
   aliases?: string[];
   names?: Record<string, string>;
   parent?: string | null;

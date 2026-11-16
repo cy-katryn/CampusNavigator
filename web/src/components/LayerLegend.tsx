@@ -1,23 +1,18 @@
-import { ALL_CATEGORIES, type Category } from '../lib/geo';
-
-const CATEGORY_LABELS: Record<Category, string> = {
-  recycle: 'recycling',
-  water: 'water',
-  toilet: 'toilet',
-  aed: 'AED',
-  food: 'canteen',
-  service: 'clinic · other',
-};
+import { LEGEND } from '../lib/geo';
 
 const CHIP =
   'inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-line bg-panel px-2 py-[3px] ' +
   'font-sans text-[10.5px] text-muted transition hover:border-line-strong hover:text-ink';
 
+const HEAD =
+  'm-0 text-[9.5px] font-semibold uppercase tracking-[0.09em] text-muted/80';
+
 export interface LayerLegendProps {
-  hidden: Set<Category>;
+  hidden: Set<string>;
   showLinks: boolean;
   showDoors: boolean;
-  onToggleCategory(category: Category): void;
+  onToggleCategory(key: string): void;
+  onToggleCategoryGroup(section: string, on: boolean): void;
   onToggleLinks(): void;
   onToggleDoors(): void;
   onShowAll(): void;
@@ -29,11 +24,18 @@ function stateClass(off: boolean): string {
 }
 
 /* The legend sits in the bottom-left corner the way a printed campus map carries its
-   key. `w-max` keeps the panel exactly as wide as the chips in it. */
+   key. Chips are grouped the way the campus map publishes its places: by category,
+   and under Amenities by the amenity itself. */
 export function LayerLegend(props: LayerLegendProps) {
   const { hidden } = props;
+
+  const anyShown = (section: string): boolean => {
+    const entries = LEGEND.find((item) => item.id === section)?.entries || [];
+    return entries.some((entry) => !hidden.has(entry.key));
+  };
+
   return (
-    <div className="absolute bottom-[30px] left-3 z-[4] flex w-max max-w-[260px] flex-col gap-1.5 rounded-xl border border-line bg-panel-glass px-[11px] py-[9px] text-[11px] text-muted shadow-[0_6px_18px_var(--accent-ring)] backdrop-blur-[6px]">
+    <div className="absolute bottom-[30px] left-3 z-[4] flex w-max max-w-[264px] flex-col gap-1.5 rounded-xl border border-line bg-panel-glass px-[11px] py-[9px] text-[11px] text-muted shadow-[0_6px_18px_var(--accent-ring)] backdrop-blur-[6px]">
       <div className="flex flex-wrap items-center gap-[5px]">
         <button
           type="button"
@@ -53,23 +55,35 @@ export function LayerLegend(props: LayerLegendProps) {
         </button>
       </div>
 
-      <div className="flex max-w-[196px] flex-wrap gap-[5px]">
-        {ALL_CATEGORIES.map((category) => (
+      {LEGEND.map((section) => (
+        <div key={section.id} className="flex max-w-[238px] flex-col gap-1">
           <button
-            key={category}
             type="button"
-            data-cat={category}
-            onClick={() => props.onToggleCategory(category)}
-            className={CHIP + stateClass(hidden.has(category))}
+            onClick={() => props.onToggleCategoryGroup(section.id, !anyShown(section.id))}
+            className={HEAD + ' w-max cursor-pointer hover:text-ink'}
+            title={'Show or hide every ' + section.label.toLowerCase() + ' chip'}
           >
-            <i
-              className="inline-block h-2 w-2 rounded-full"
-              style={{ background: 'var(--cat-' + category + ')' }}
-            />
-            {CATEGORY_LABELS[category]}
+            {section.label}
           </button>
-        ))}
-      </div>
+          <div className="flex flex-wrap gap-[5px]">
+            {section.entries.map((entry) => (
+              <button
+                key={entry.key}
+                type="button"
+                data-cat={entry.key}
+                onClick={() => props.onToggleCategory(entry.key)}
+                className={CHIP + stateClass(hidden.has(entry.key))}
+              >
+                <i
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ background: 'var(--cat-' + entry.key + ')' }}
+                />
+                {entry.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
 
       <div className="flex gap-1.5">
         <button

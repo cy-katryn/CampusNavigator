@@ -144,7 +144,7 @@ class TestSearchOptimality(unittest.TestCase):
         cls.library = find_id(cls.graph, "library")
 
     def _pairs(self, limit: int = 20):
-        buildings = [n.id for n in self.graph.nodes.values() if n.kind == "building"][:6]
+        buildings = [n.id for n in self.graph.nodes.values() if n.kind == "place"][:6]
         return [(a, b) for a in buildings for b in buildings if a != b][:limit]
 
     def test_astar_matches_dijkstra(self):
@@ -199,7 +199,8 @@ class TestConstraintsAndDemoNarrative(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.graph = CampusGraph.load(graph_path())
-        cls.entrance = next(n.id for n in cls.graph.nodes.values() if n.kind == "entrance")
+        # Doorways are not in this node set; any named place serves the same purpose.
+        cls.entrance = next(n.id for n in cls.graph.nodes.values() if n.kind == "place" and n.name)
         cls.library = next(n.id for n in cls.graph.nodes.values() if "library" in n.name.lower())
         cls.base = astar(cls.graph, cls.entrance, cls.library)
         cls.route_edges = [s.edge_id for s in cls.base.segments]
@@ -242,7 +243,7 @@ class TestConstraintsAndDemoNarrative(unittest.TestCase):
         self.assertTrue(data["same_cost"])
 
     def test_service_nodes_accept_the_documented_materials(self):
-        service = [n for n in self.graph.nodes.values() if n.kind == "service" and n.accepts]
+        service = [n for n in self.graph.nodes.values() if n.kind == "facility" and n.accepts]
         self.assertTrue(service, "no service nodes carry a capability")
         for node in service[:50]:
             self.assertTrue(all(isinstance(a, str) and a for a in node.accepts))

@@ -1,10 +1,8 @@
 import {
-  ALL_CATEGORIES,
-  categoryOf,
+  ALL_LEGEND_KEYS,
+  legendKeyOf,
   hash01,
   METRES_PER_DEG_LAT,
-  shortCode,
-  type Category,
 } from './geo';
 import type {
   FacilityCard,
@@ -85,8 +83,8 @@ export class CampusMap {
   private basemap = true;
   private showLinks = false;
   private showDoors = false;
-  private hidden = new Set<Category>(ALL_CATEGORIES);
-  private serviceGroups: { el: SVGGElement; cat: Category }[] = [];
+  private hidden = new Set<string>(ALL_LEGEND_KEYS);
+  private serviceGroups: { el: SVGGElement; cat: string }[] = [];
   private drag: { x: number; y: number; vx: number; vy: number } | null = null;
   private teardown: (() => void)[] = [];
   private routes: RouteOption[] = [];
@@ -114,7 +112,7 @@ export class CampusMap {
     this.drawGraph();
   }
 
-  setHiddenCategories(hidden: Set<Category>): void {
+  setHiddenCategories(hidden: Set<string>): void {
     this.hidden = new Set(hidden);
     this.applyFilters();
   }
@@ -543,8 +541,8 @@ export class CampusMap {
       if (node.kind === 'entrance' && !this.showDoors) return;
       const p = this.project(node.lat, node.lng);
       const g = el('g', { class: 'node ' + node.kind }) as SVGGElement;
-      if (node.kind === 'service') {
-        const cat = categoryOf(node);
+      if (node.kind === 'facility') {
+        const cat = legendKeyOf(node);
         g.classList.add('cat-' + cat);
         this.serviceGroups.push({ el: g, cat });
         g.appendChild(el('circle', { cx: p.x, cy: p.y, r: SERVICE_RADIUS }));
@@ -584,32 +582,17 @@ export class CampusMap {
             rx: size * 0.17,
           }),
         );
-        if (node.kind === 'building') {
-          const code = el('text', { x: p.x, y: p.y + size * 0.17, class: 'node-code' });
-          code.textContent = shortCode(node.name);
-          g.appendChild(code);
-        }
         if (node.kind === 'place') {
-          // filed under the "clinic · other" chip, so that chip means "every destination
-          // that is not a facility" and the default map stays clean
-          g.classList.add('cat-service');
-          this.serviceGroups.push({ el: g, cat: 'service' });
+          // A place is filed under its own category -- a block, a main location -- so the
+          // legend can show or hide those destinations independently of the amenities.
+          const cat = legendKeyOf(node);
+          g.classList.add('cat-' + cat);
+          this.serviceGroups.push({ el: g, cat });
         }
       }
       const tip = el('title', {});
       tip.textContent = node.name + (node.service ? ' · ' + node.service : '');
       g.appendChild(tip);
-
-      if (node.kind === 'building') {
-        const label = el('text', {
-          x: p.x + 6,
-          y: p.y + 2,
-          class: 'node-label building-label',
-        });
-        label.textContent = node.name.length > 26 ? node.name.slice(0, 25) + '…' : node.name;
-        label.style.display = 'none';
-        nodeLayer.appendChild(label);
-      }
 
       g.addEventListener('click', (ev) => {
         ev.stopPropagation();

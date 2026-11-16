@@ -491,6 +491,7 @@ class App:
                     "lat": n.lat,
                     "lng": n.lng,
                     "kind": n.kind,
+                    "category": n.category,
                     "parent": n.parent,
                     "building": n.building,
                     "service": n.service,

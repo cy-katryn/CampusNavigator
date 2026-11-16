@@ -69,7 +69,18 @@ class Node:
     name: str
     lat: float
     lng: float
-    kind: str = "place"          # building | entrance | service | waypoint
+    # The role this node plays in the graph -- NOT how the campus map files it, which
+    # is the category field below:
+    #   waypoint  a junction of the walkway geometry: never named, never a destination
+    #   place     a destination: a block, a main location
+    #   facility  somewhere inside a building: a toilet, an office, an AED
+    #   entrance  a doorway, when the source publishes one
+    kind: str = "place"
+    # The campus map's own category, as published: "Amenities", "Main Locations",
+    # "Faculties, Schools & Departments", "Administrative & Supporting Office",
+    # "Public Transport", "Buildings / Cores / Wings / Blocks". The legend groups on
+    # this, and -- under Amenities -- by the service label.
+    category: str = ""
     building: str = ""
     floor: str = ""
     name_zh: str = ""            # the Chinese name in traditional characters
@@ -126,6 +137,7 @@ class CampusGraph:
                 lat=float(n["lat"]),
                 lng=float(n["lng"]),
                 kind=n.get("kind", "place"),
+                category=n.get("category", ""),
                 building=n.get("building", ""),
                 floor=n.get("floor", ""),
                 parent=n.get("parent", ""),
@@ -319,9 +331,9 @@ class CampusGraph:
                     best = 20 + min(19, bracketed // 4)
             if best > 0:
                 scored.append((best, node))
-        # A shared name at equal confidence (e.g. 圖書館) should prefer
-        # the named place over a service situated inside that place.
-        scored.sort(key=lambda t: (-t[0], t[1].kind == "service", t[1].name))
+        # A shared name at equal confidence (e.g. 圖書館) should prefer the named
+        # place over a facility situated inside that place.
+        scored.sort(key=lambda t: (-t[0], t[1].kind == "facility", t[1].name))
         return scored
 
     def summary(self) -> str:

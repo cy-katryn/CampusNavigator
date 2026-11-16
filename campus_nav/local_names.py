@@ -73,7 +73,7 @@ def building_name(graph: CampusGraph, label: str, lang: str) -> str:
     if not label:
         return ""
     node = graph.nodes.get(label)
-    if node and node.kind == "building":
+    if node and node.kind == "place":
         return place_name(graph, node.id, lang)
     if lang not in _CHINESE:
         return label

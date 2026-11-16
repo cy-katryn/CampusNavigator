@@ -1,4 +1,4 @@
-﻿/* PolyU Campus Navigator - stylesheet.
+/* PolyU Campus Navigator - stylesheet.
  *
  * Tailwind owns the interface: every component in src/components is styled with
  * utilities, and the palette these utilities point at lives in the block below (and
@@ -9,7 +9,7 @@
  *   - the avatar: one inline SVG whose paint and five state animations are keyed off
  *     a single class name, and whose gradient stops are styled by selector
  *   - the map layers: the drawing code creates elements by class name (.fp-wall,
- *     .edge, .node.service, .route-line ...), so those rules are the contract between
+ *     .edge, .node.facility, .route-line ...), so those rules are the contract between
  *     CampusMap and the picture
  */
 @tailwind base;
@@ -59,12 +59,24 @@
   --danger-soft:      #fdeceb;
 
   /* -- facility categories (legend + map pins) -- */
-  --cat-recycle:      #2f8f6b;   /* green   */
-  --cat-water:        #2b6cb0;   /* blue    */
-  --cat-toilet:       #0f766e;   /* teal    */
-  --cat-aed:          #b3261e;   /* red     */
-  --cat-food:         #b45309;   /* amber   */
-  --cat-service:      #6b5b95;   /* purple  */
+  /* One colour per legend chip. The chips are the campus map's own categories, and
+     under Amenities its amenity subtypes, so this list mirrors that taxonomy. */
+  --cat-buildings:                #8c2f3d;   /* PolyU red, the blocks themselves */
+  --cat-locations:                #0e7490;   /* cyan, the open spaces         */
+  --cat-faculties:                #7c3aed;   /* violet                        */
+  --cat-offices:                  #4f46e5;   /* indigo                        */
+  --cat-transport:                #475569;   /* slate                         */
+  --cat-amenity-lecture-theatre:  #a16207;   /* brown                         */
+  --cat-amenity-aed:              #b3261e;   /* red                           */
+  --cat-amenity-water:            #2b6cb0;   /* blue                          */
+  --cat-amenity-toilet:           #0f766e;   /* teal                          */
+  --cat-amenity-accessible-toilet:#0d9488;   /* lighter teal                  */
+  --cat-amenity-catering:         #b45309;   /* amber                         */
+  --cat-amenity-clinic:           #6b5b95;   /* purple                        */
+  --cat-amenity-lactation:        #be185d;   /* pink                          */
+  --cat-amenity-prayer:           #2f8f6b;   /* green                         */
+  --cat-amenity-other:            #94a3b8;   /* grey                          */
+  --tree:                         #2f8f6b;
 
   /* -- the route -------------------------------------------------------------
      Not the brand red: the building walls are rust (109, 48, 16), so a red line
@@ -304,7 +316,7 @@ html, body {
 #map.basemap .tree { display: none; }
 #map.basemap .node.building rect { fill: var(--panel); opacity: .62; stroke: var(--accent); }
 #map.basemap .node.building .node-code { fill: var(--polyu-red); stroke: none; }
-#map.basemap .node.service circle { stroke: var(--panel); }
+#map.basemap .node.facility circle { stroke: var(--panel); }
 #map.basemap .node-label { stroke: var(--panel); stroke-width: 3.2; }
 
 /* only visible while a route is on the map, in the route colour */
@@ -346,7 +358,7 @@ html, body {
 .node.entrance .node-code { fill: var(--on-accent); stroke: none; }
 .node-shadow { fill: var(--node-line); opacity: .28; }
 .node:hover .node-shadow { fill: var(--accent); opacity: .2; }
-.tree { fill: var(--cat-recycle); opacity: .35; }
+.tree { fill: var(--tree); opacity: .35; }
 
 .node.entrance rect {
   fill: var(--accent); stroke: var(--on-accent);
@@ -359,17 +371,34 @@ html, body {
   fill: var(--panel); stroke: var(--accent);
   stroke-width: 1.4;
 }
+/* A destination is outlined in its own category colour, so the chip in the legend and
+   the shape on the map are visibly the same thing. */
+.node.place.cat-buildings rect { stroke: var(--cat-buildings); stroke-width: 1.8; }
+.node.place.cat-locations rect { stroke: var(--cat-locations); stroke-width: 1.8; }
+.node.place.cat-faculties rect { stroke: var(--cat-faculties); stroke-width: 1.8; }
+.node.place.cat-offices rect   { stroke: var(--cat-offices); stroke-width: 1.8; }
+.node.place.cat-transport rect { stroke: var(--cat-transport); stroke-width: 1.8; }
+.node.place.cat-amenity-other rect { stroke: var(--cat-amenity-other); stroke-width: 1.8; }
 .node.place .node-code { fill: var(--accent-dark); stroke: none; }
-.node.service circle {
+.node.facility circle {
   fill: var(--accent); stroke: var(--on-accent);
   stroke-width: 1.2;
 }
-.node.service.cat-recycle circle { fill: var(--cat-recycle); }
-.node.service.cat-water circle   { fill: var(--cat-water); }
-.node.service.cat-toilet circle  { fill: var(--cat-toilet); }
-.node.service.cat-aed circle     { fill: var(--cat-aed); }
-.node.service.cat-food circle    { fill: var(--cat-food); }
-.node.service.cat-service circle { fill: var(--cat-service); }
+.node.facility.cat-buildings circle                { fill: var(--cat-buildings); }
+.node.facility.cat-locations circle                { fill: var(--cat-locations); }
+.node.facility.cat-faculties circle                { fill: var(--cat-faculties); }
+.node.facility.cat-offices circle                  { fill: var(--cat-offices); }
+.node.facility.cat-transport circle                { fill: var(--cat-transport); }
+.node.facility.cat-amenity-lecture-theatre circle  { fill: var(--cat-amenity-lecture-theatre); }
+.node.facility.cat-amenity-aed circle              { fill: var(--cat-amenity-aed); }
+.node.facility.cat-amenity-water circle            { fill: var(--cat-amenity-water); }
+.node.facility.cat-amenity-toilet circle           { fill: var(--cat-amenity-toilet); }
+.node.facility.cat-amenity-accessible-toilet circle{ fill: var(--cat-amenity-accessible-toilet); }
+.node.facility.cat-amenity-catering circle         { fill: var(--cat-amenity-catering); }
+.node.facility.cat-amenity-clinic circle           { fill: var(--cat-amenity-clinic); }
+.node.facility.cat-amenity-lactation circle        { fill: var(--cat-amenity-lactation); }
+.node.facility.cat-amenity-prayer circle           { fill: var(--cat-amenity-prayer); }
+.node.facility.cat-amenity-other circle            { fill: var(--cat-amenity-other); }
 .node.dim { display: none; }
 .node:hover rect, .node:hover circle { fill: var(--accent); }
 .node-label {

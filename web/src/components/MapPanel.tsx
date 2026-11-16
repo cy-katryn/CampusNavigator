@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Maximize2, Minus, Map as MapIcon, Plus } from 'lucide-react';
-import { ALL_CATEGORIES, type Category } from '../lib/geo';
+import { ALL_LEGEND_KEYS, LEGEND } from '../lib/geo';
 import { CampusMap, type ScaleInfo } from '../lib/campusMap';
 import type { FacilityCard, Graph, GraphNode, RouteOption } from '../types';
 import { LayerLegend } from './LayerLegend';
@@ -23,7 +23,7 @@ const TOOL_BTN =
 
 export function MapPanel(props: MapPanelProps) {
   const svg = useRef<SVGSVGElement>(null);
-  const [hidden, setHidden] = useState<Set<Category>>(new Set(ALL_CATEGORIES));
+  const [hidden, setHidden] = useState<Set<string>>(new Set(ALL_LEGEND_KEYS));
   const [showLinks, setShowLinks] = useState(false);
   const [showDoors, setShowDoors] = useState(false);
   const [basemap, setBasemap] = useState(true);
@@ -88,11 +88,24 @@ export function MapPanel(props: MapPanelProps) {
     props.onSend('how do I get to ' + node.name + '?');
   };
 
-  const toggleCategory = (category: Category) => {
+  const toggleCategory = (key: string) => {
     setHidden((previous) => {
       const next = new Set(previous);
-      if (next.has(category)) next.delete(category);
-      else next.add(category);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  /* One click on a section heading shows or hides every chip in that section. */
+  const toggleGroup = (section: string, on: boolean) => {
+    const keys = LEGEND.find((item) => item.id === section)?.entries.map((entry) => entry.key) || [];
+    setHidden((previous) => {
+      const next = new Set(previous);
+      for (const key of keys) {
+        if (on) next.delete(key);
+        else next.add(key);
+      }
       return next;
     });
   };
@@ -135,10 +148,11 @@ export function MapPanel(props: MapPanelProps) {
           showLinks={showLinks}
           showDoors={showDoors}
           onToggleCategory={toggleCategory}
+          onToggleCategoryGroup={toggleGroup}
           onToggleLinks={() => setShowLinks((on) => !on)}
           onToggleDoors={() => setShowDoors((on) => !on)}
           onShowAll={() => setHidden(new Set())}
-          onHideAll={() => setHidden(new Set(ALL_CATEGORIES))}
+          onHideAll={() => setHidden(new Set(ALL_LEGEND_KEYS))}
         />
 
         <div

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
-import { categoryOf } from '../lib/geo';
+import { legendKeyOf } from '../lib/geo';
 import type { GraphNode } from '../types';
 
 export interface PlaceSearchProps {
@@ -119,18 +119,18 @@ export function PlaceSearch({ nodes, onChoose }: PlaceSearchProps) {
                 <i
                   className="h-2 w-2 flex-none rounded-full bg-brand"
                   style={
-                    hit.kind === 'service' && hit.service
-                      ? { background: 'var(--cat-' + categoryOf(hit) + ')' }
+                    hit.service
+                      ? { background: 'var(--cat-' + legendKeyOf(hit) + ')' }
                       : undefined
                   }
                 />
                 <span>{hit.name}</span>
                 <span className="ml-auto whitespace-nowrap text-[11px] text-muted">
-                  {hit.kind === 'service'
+                  {hit.kind === 'facility'
                     ? hit.service || 'facility'
                     : hit.kind === 'entrance'
                       ? 'entrance'
-                      : 'building'}
+                      : 'place'}
                 </span>
               </div>
             ))

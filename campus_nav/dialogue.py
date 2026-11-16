@@ -342,9 +342,9 @@ class Dialogue:
             return prefix
         wants_service = any(w in text.lower() for w in SERVICE_WORDS)
         if wants_service:
-            matches = [n for n in matches if n.kind == "service"] or matches
+            matches = [n for n in matches if n.kind == "facility"] or matches
         else:
-            matches = [n for n in matches if n.kind != "service"] or matches
+            matches = [n for n in matches if n.kind != "facility"] or matches
         # Keep only the best-scoring band. A weaker match is not an alternative to the
         # phrase, it is a worse answer: "library" must not also offer "Block M (Li Ka
         # Shing Tower)" merely because a word landed in its brackets.
@@ -390,7 +390,7 @@ class Dialogue:
                 )
 
         # 2) two places -> the link that joins them
-        places = [n for n in self._preferred_matches(text) if n.kind != "service"]
+        places = [n for n in self._preferred_matches(text) if n.kind != "facility"]
         if len(places) >= 2:
             ids = {
                 e.id for e in self.graph.edges
@@ -774,7 +774,7 @@ class Dialogue:
 
         matches: list[Node] = []
         for node in self.graph.nodes.values():
-            if node.kind != "service":
+            if node.kind != "facility":
                 continue
             doc = self._facility_doc(node)
             if raw == "accessible toilet" and slots.language == "zh":
@@ -862,7 +862,7 @@ class Dialogue:
 
         if not raw:
             # No subject named: summarise what exists instead of dumping every bin.
-            nodes = [n for n in self.graph.nodes.values() if n.kind == "service"]
+            nodes = [n for n in self.graph.nodes.values() if n.kind == "facility"]
             counts: dict[str, int] = {}
             for node in nodes:
                 counts[node.service] = counts.get(node.service, 0) + 1
