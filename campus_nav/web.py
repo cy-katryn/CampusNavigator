@@ -60,9 +60,9 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 def load_shapes(path) -> list[dict]:
     """Read the map geometry you drew in geojson.io.
 
-    data/authored/campus_shapes.geojson is the whole 2.5D layer: every polygon you
-    keep is extruded, every polygon you delete is gone. Nothing is clipped, filtered
-    or guessed afterwards -- if it is in the file, it is deliberate.
+    data/authored/campus_buildings1.geojson is the whole 2.5D layer: every polygon you
+    keep is drawn, every polygon you delete is gone. Nothing is clipped, filtered or
+    guessed afterwards -- if it is in the file, it is deliberate.
 
         {"type": "Feature",
          "properties": {"name": "Block Z", "height": 28},
@@ -103,11 +103,11 @@ def load_shapes(path) -> list[dict]:
             entry = {
                 "id": str(props.get("id") or f"drawn-{index}"),
                 "ring": points,
-                # English first: the roof badge is cut from these first two letters, and
-                # "賽馬會創新樓 Jockey Club Innovation Tower" would badge itself "賽馬"
+                # English first, because a Chinese-first name sorts and reads worse in
+                # the tooltip: "賽馬會創新樓 Jockey Club Innovation Tower"
                 "name": str(props.get("name:en") or props.get("name") or ""),
-                # "water" / "green" / "pitch" / "bridge" are drawn FLAT: a pool or a
-                # lawn has no height to extrude, and saying otherwise would be a lie
+                # "plaza" / "green" / "pitch" / "water" are drawn FLAT: a square, a lawn
+                # or a pool has no height to extrude, and saying otherwise would be a lie
                 "kind": str(props.get("kind") or shape_kind(props, is_line)),
                 "line": is_line,
             }
@@ -118,6 +118,15 @@ def load_shapes(path) -> list[dict]:
             # rest of the campus; the value is passed through untouched.
             if props.get("tone"):
                 entry["tone"] = str(props["tone"])
+            # The letter to print on this structure: an explicit "display" column if you
+            # ever add one, otherwise the campus block code already in "ref" -- L for the
+            # library, VA for Shaw Amenities, Y for the Lee Shau Kee Building, V for the
+            # Innovation Tower. No ref and no display means no letter at all: the map
+            # must never abbreviate a name into a code of its own.
+            label = (str(props.get("display") or "").strip()
+                     or str(props.get("ref") or "").strip())
+            if label:
+                entry["display"] = label
             rings.append(entry)
     if broken:
         print(f"[map] {len(broken)} feature(s) in {Path(path).name} cannot be drawn "
@@ -149,19 +158,38 @@ def route_payload(graph: CampusGraph, route) -> dict | None:
         for node_id in route.path
         if node_id in graph.nodes and graph.node(node_id).kind != "waypoint"
     ]
+    # Each segment's geometry is walked in the direction the route travels it. An edge
+    # stores its polyline one fixed way (u -> v); appending them in that order whatever
+    # the travel throws a straight chord across every bend taken backwards, which is
+    # what drew long straight lines through the middle of a route.
+    segments = []
+    cursor = None
+    if route.path:
+        start = graph.node(route.path[0])
+        cursor = [start.lat, start.lng]
+    for seg in route.segments:
+        points = [list(point) for point in (seg.path or [])]
+        if len(points) < 2:
+            points = [[graph.node(seg.u).lat, graph.node(seg.u).lng],
+                      [graph.node(seg.v).lat, graph.node(seg.v).lng]]
+        if cursor is not None:
+            head = (points[0][0] - cursor[0]) ** 2 + (points[0][1] - cursor[1]) ** 2
+            tail = (points[-1][0] - cursor[0]) ** 2 + (points[-1][1] - cursor[1]) ** 2
+            if tail < head:
+                points.reverse()
+        cursor = points[-1]
+        segments.append({
+            "from": seg.u,
+            "to": seg.v,
+            "metres": round(seg.metres, 1),
+            "path": points,
+        })
+
     return {
         "reachable": route.reachable,
         "metres": round(route.total_metres, 1) if route.reachable else 0.0,
         "path": path,
-        "segments": [
-            {
-                "from": seg.u,
-                "to": seg.v,
-                "metres": round(seg.metres, 1),
-                "path": [list(point) for point in seg.path],
-            }
-            for seg in route.segments
-        ],
+        "segments": segments,
         "stats": (
             {
                 "algorithm": route.stats.algorithm,

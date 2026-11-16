@@ -29,7 +29,10 @@ const state = {
   basemap: true,            // street tiles underneath (off = plain diagram)
   showLinks: false,         // the walkway network is scaffolding, hidden by default
   showDoors: false,         // 24 doorways is a lot of markers; off until asked for
-  hidden: new Set(),        // facility categories the user has switched off
+  // Facility pins start switched OFF. The map opens as a campus map -- footprints and
+  // their letters -- and the six chips bring the pins back. They are still every one of
+  // them clickable; they are simply not poured over the buildings by default.
+  hidden: new Set(['recycle', 'water', 'toilet', 'aed', 'food', 'service']),
   serviceGroups: [],        // every facility pin, for filtering
 };
 
@@ -448,20 +451,14 @@ function drawFootprints() {
       if (d < ownerDistance) { ownerDistance = d; owner = b; }
     });
     if (owner) {
-      zone = zoneOf(shortCode(owner.name));
+      zone = zoneOf(item.display || shortCode(owner.name));
       ownerDistance = Math.sqrt(ownerDistance) * 111320;   // metres
     }
-    // Which letter belongs on this roof? The polygon's own name first, then the
-    // footprint it stands inside, and only then the nearest node -- otherwise a
-    // 9 m slab of the Innovation Tower gets labelled "X" because Block X happens to
-    // be 22 m away.
-    let badge = item.name ? shortCode(item.name) : '';
-    if (!badge) {
-      const outer = rings.find((other) => other !== item && other.name
-        && pointInRing(centre[1], centre[0], other.ring));
-      if (outer) badge = shortCode(outer.name);
-    }
-    if (!badge && owner) badge = shortCode(owner.name);
+    // Which letter belongs on this roof? The one the data gives: "display" if present,
+    // else the block code in "ref". Nothing else. Deriving a code from the name is what
+    // put "LE" on the Lee Shau Kee Building (whose block is Y) and "JO" on the Innovation
+    // Tower (whose block is V), and it invented codes for the eleven unnamed slabs too.
+    const badge = item.display || '';
     // a hand-drawn shape may carry its own height; otherwise vary it deterministically
     // by id (OSM rarely tags height): 55-100% of the palette maximum
     const height = item.height || maxHeight * (0.55 + hash01(item.id, 3) * 0.45);
@@ -586,6 +583,12 @@ function drawGraph() {
       g.classList.add('cat-' + cat);
       state.serviceGroups.push({ el: g, cat });
       g.appendChild(el('circle', { cx: p.x, cy: p.y, r: 7 }));
+    } else if (n.kind === 'place') {
+      // a square of its own, filed under the "clinic · other" chip so that chip means
+      // "every destination that is not a facility", and the default stays clean
+      g.classList.add('cat-service');
+      state.serviceGroups.push({ el: g, cat: 'service' });
+      g.appendChild(el('rect', { x: p.x - 7, y: p.y - 7, width: 14, height: 14, rx: 3 }));
     } else {
       const size = n.kind === 'entrance' ? 13 : (n.kind === 'place' ? 14 : 18);
       // a shadowed face under the block: the cheapest honest nod to 2.5D, since a

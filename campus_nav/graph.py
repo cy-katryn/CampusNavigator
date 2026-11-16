@@ -49,6 +49,20 @@ def haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(h))
 
 
+_BRACKETED = re.compile(r"\(([^)]*)\)")
+
+
+def name_parts(name: str) -> tuple[str, str]:
+    """Split a name into what a place IS and where it IS.
+
+    "Toilet (Block Y)" -> ("toilet", "block y"). The bracket is a location qualifier, so
+    a match on it must never outrank a match on the part that says what the thing is.
+    """
+    tail = " ".join(_BRACKETED.findall(name or "")).lower()
+    head = " ".join(_BRACKETED.sub(" ", name or "").split()).lower()
+    return head, tail
+
+
 @dataclass(frozen=True)
 class Node:
     id: str
@@ -58,7 +72,7 @@ class Node:
     kind: str = "place"          # building | entrance | service | waypoint
     building: str = ""
     floor: str = ""
-    aliases: tuple[str, ...] = ()
+    name_zh: str = ""            # the Chinese name, the only other name a node has
     parent: str = ""             # the building this thing stands inside, if any
     service: str = ""            # e.g. "Rechargeable Battery Collection"
     accepts: tuple[str, ...] = ()  # canonical item categories this point accepts
@@ -114,7 +128,7 @@ class CampusGraph:
                 building=n.get("building", ""),
                 floor=n.get("floor", ""),
                 parent=n.get("parent", ""),
-                aliases=tuple(n.get("aliases", ())),
+                name_zh=str(n.get("name_zh", "")),
                 service=n.get("service", ""),
                 accepts=tuple(n.get("accepts", ())),
                 source=n.get("source", ""),
@@ -241,6 +255,16 @@ class CampusGraph:
         inside another word ("e-N-trance"), so substring matching requires 3+
         characters on the candidate and 4+ on the user's word.
         """
+        return [node for _, node in self.resolve_scored(text)]
+
+    def resolve_scored(self, text: str) -> list[tuple[int, "Node"]]:
+        """Every node the phrase could mean, best first, with the score kept.
+
+        A name has two halves: what the place IS and, in brackets, where it is --
+        "Toilet (Block Y)" versus "Block Y (Lee Shau Kee Building)". A phrase that
+        matches the first half wins outright; the same words inside the brackets are
+        worth a full tier less, so "block y" finds the block and not the toilet in it.
+        """
         if not text:
             return []
         needle = " ".join(text.lower().replace("_", " ").split())
@@ -251,48 +275,51 @@ class CampusGraph:
             return re.search(rf"(?<![a-z0-9]){re.escape(short)}(?![a-z0-9])", long) is not None
 
         needle_words = [w for w in re.findall(r"[a-z0-9\u3400-\u9fff]{4,}", needle)]
+        short_tokens = [
+            token for token in re.findall(r"[a-z0-9]+", needle)
+            if len(token) < 4 and token not in STOPWORDS
+        ]
+
+        def score(cand: str) -> int:
+            """100 exact, 60-90 whole words by coverage, 40-65 loose single words."""
+            if not cand:
+                return 0
+            if needle == cand:
+                return 100
+            if len(cand) >= 3 and (has_words(cand, needle) or has_words(needle, cand)):
+                return 60 + round(30 * min(len(needle), len(cand))
+                                  / max(len(needle), len(cand)))
+            if any(not has_words(token, cand) for token in short_tokens):
+                return 0
+            for word in needle_words:
+                if has_words(word, cand):
+                    return 40 + min(len(word), 25)
+            return 0
 
         scored: list[tuple[int, Node]] = []
         for node in self.nodes.values():
-            # A waypoint is a bend in a walkway, not a place. It has no name worth
-            # saying and must never be offered as a destination.
+            # A waypoint is a bend in a walkway, not a place: no name worth saying, and
+            # never a destination.
             if node.kind == "waypoint" or not node.name:
                 continue
-            candidates = {node.id.lower(), node.name.lower(), *(a.lower() for a in node.aliases)}
-            candidates = {c.strip() for c in candidates if c and c.strip()}
-            best = 0
-            for cand in candidates:
-                if needle == cand:
-                    best = max(best, 100)
-                    continue
-                if len(cand) >= 3 and (has_words(cand, needle) or has_words(needle, cand)):
-                    # Score by how much of the candidate the needle accounts for, not
-                    # by raw length: a long grouped name such as
-                    # "entrance (pao yue-kong library)" must not outrank the building
-                    # it belongs to when the user just said "library".
-                    coverage = min(len(needle), len(cand)) / max(len(needle), len(cand))
-                    best = max(best, 60 + round(30 * coverage))
-            if best < 60:
-                # The loose tier must not ignore the part of the name that discriminates:
-                # "Core Z" is not Core A merely because both say "core", so every short
-                # token in the query has to appear in the candidate too.
-                short_tokens = [
-                    token for token in re.findall(r"[a-z0-9]+", needle)
-                    if len(token) < 4 and token not in STOPWORDS
-                ]
-                for cand in candidates:
-                    if len(cand) < 3:
-                        continue
-                    if any(not has_words(token, cand) for token in short_tokens):
-                        continue
-                    for word in needle_words:
-                        if has_words(word, cand):
-                            best = max(best, 40 + min(len(word), 25))
-                            break
-            if best:
+            head, tail = name_parts(node.name)
+            best = max(score(node.id.lower()), score(head))
+            if node.name_zh:
+                best = max(best, score(node.name_zh.lower()))
+            if needle == node.name.lower():
+                best = max(best, 96)          # typed out in full, brackets and all
+            if best == 0 and tail:
+                # The phrase only names WHERE this thing is, not what it is: "the library"
+                # must find the Library, not the AED standing in it. Anything that matches
+                # on what the place IS -- even loosely -- outranks this. No match in the
+                # brackets means no match at all: an empty score must stay zero.
+                bracketed = score(tail)
+                if bracketed:
+                    best = 20 + min(19, bracketed // 4)
+            if best > 0:
                 scored.append((best, node))
         scored.sort(key=lambda t: (-t[0], t[1].name))
-        return [n for _, n in scored]
+        return scored
 
     def summary(self) -> str:
         closed = sum(1 for e in self.edges if not e.open)
