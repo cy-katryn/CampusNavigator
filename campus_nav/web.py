@@ -143,6 +143,33 @@ LOCK = threading.Lock()
 
 
 # --------------------------------------------------------------------- payloads
+def _oriented_segments(graph: CampusGraph, route) -> list[tuple]:
+    """Each segment's geometry walked in the direction the route travels it.
+
+    An edge stores its polyline one fixed way (u -> v); appending the segments in that
+    order whatever the travel throws a straight chord across every bend taken
+    backwards, which is what drew long straight lines through the middle of a route.
+    """
+    cursor = None
+    if route.path:
+        start = graph.node(route.path[0])
+        cursor = [start.lat, start.lng]
+    oriented = []
+    for seg in route.segments:
+        points = [list(point) for point in (seg.path or [])]
+        if len(points) < 2:
+            points = [[graph.node(seg.u).lat, graph.node(seg.u).lng],
+                      [graph.node(seg.v).lat, graph.node(seg.v).lng]]
+        if cursor is not None:
+            head = (points[0][0] - cursor[0]) ** 2 + (points[0][1] - cursor[1]) ** 2
+            tail = (points[-1][0] - cursor[0]) ** 2 + (points[-1][1] - cursor[1]) ** 2
+            if tail < head:
+                points.reverse()
+        cursor = points[-1]
+        oriented.append((seg, points))
+    return oriented
+
+
 def route_payload(graph: CampusGraph, route) -> dict | None:
     """The route, with coordinates, so the browser can draw it without guessing."""
     if route is None:
@@ -160,32 +187,17 @@ def route_payload(graph: CampusGraph, route) -> dict | None:
         for node_id in route.path
         if node_id in graph.nodes and graph.node(node_id).kind != "waypoint"
     ]
-    # Each segment's geometry is walked in the direction the route travels it. An edge
-    # stores its polyline one fixed way (u -> v); appending them in that order whatever
-    # the travel throws a straight chord across every bend taken backwards, which is
-    # what drew long straight lines through the middle of a route.
-    segments = []
-    cursor = None
-    if route.path:
-        start = graph.node(route.path[0])
-        cursor = [start.lat, start.lng]
-    for seg in route.segments:
-        points = [list(point) for point in (seg.path or [])]
-        if len(points) < 2:
-            points = [[graph.node(seg.u).lat, graph.node(seg.u).lng],
-                      [graph.node(seg.v).lat, graph.node(seg.v).lng]]
-        if cursor is not None:
-            head = (points[0][0] - cursor[0]) ** 2 + (points[0][1] - cursor[1]) ** 2
-            tail = (points[-1][0] - cursor[0]) ** 2 + (points[-1][1] - cursor[1]) ** 2
-            if tail < head:
-                points.reverse()
-        cursor = points[-1]
-        segments.append({
+    # Each segment's geometry is walked in the direction the route travels it, so the
+    # browser can append them end to end without crossing the map.
+    segments = [
+        {
             "from": seg.u,
             "to": seg.v,
             "metres": round(seg.metres, 1),
             "path": points,
-        })
+        }
+        for seg, points in _oriented_segments(graph, route)
+    ]
 
     return {
         "reachable": route.reachable,
@@ -234,7 +246,7 @@ def route_option(graph: CampusGraph, route) -> dict | None:
             for node_id in places
         ],
         "segments": [
-            {"path": [list(point) for point in seg.path]} for seg in route.segments
+            {"path": points} for _, points in _oriented_segments(graph, route)
         ],
     }
 
