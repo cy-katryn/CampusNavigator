@@ -69,6 +69,23 @@ def drop_filler(text: str) -> str:
     return " ".join(kept or words).strip()
 
 
+def singular(word: str) -> str:
+    """"One word, with an English plural folded to its singular.
+
+    Names are published in the singular ("Toilet (Block V)") and people ask in the plural
+    ("where are the toilets"), so both sides of every comparison go through this. The
+    guards matter: "physics", "campus", "analysis" and "VS" are not plurals, and
+    "libraries" is "library", not "librarie".
+    """
+    if len(word) < 4 or not word.endswith("s"):
+        return word
+    if word.endswith(("ss", "us", "is", "as", "os")):
+        return word
+    if word.endswith("ies") and len(word) > 4:
+        return word[:-3] + "y"
+    return word[:-1]
+
+
 def normalise(text: str) -> list[str]:
     """"The words a phrase is about": lowercased, filler dropped, block letters kept.
 
@@ -81,7 +98,7 @@ def normalise(text: str) -> list[str]:
     # Sentence punctuation is not part of a word: "closed today." must still be read as
     # "closed" + "today", or the filler word survives and poisons the phrase.
     words = [word.strip(".,;:!?()[]{}\"'") for word in words]
-    words = [word for word in words if word]
+    words = [singular(word) for word in words if word]
     return [
         word for position, word in enumerate(words)
         if word not in STOPWORDS

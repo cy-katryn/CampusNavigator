@@ -13,6 +13,9 @@ Two deliberate choices:
     whose footprint edge is within `within_m` of the line counts.
   * The endpoints are left out. The reply already names the start and the goal; repeating
     them as "landmarks" would be noise.
+  * Only the campus map's "Buildings / Cores / Wings / Blocks" count. Not the squares and
+    galleries it files under "Main Locations", and nothing inside a building: the point is
+    the short list of blocks a person looks up and sees.
 
 Nothing here is invented: a landmark is a node from the graph with its own published name
 and coordinates, and its metre mark comes from the walked geometry the engine measured.
@@ -34,12 +37,13 @@ MAX_LANDMARKS = 6
 # standing at is not something you "pass", and naming it twice crowds out a real landmark.
 EDGE_M = 12.0
 
-# Only the published categories a person navigates by. A toilet inside a building is not
-# a landmark; the building is.
-GUIDE_CATEGORIES = frozenset({
-    "Buildings / Cores / Wings / Blocks",
-    "Main Locations",
-})
+# The only category that counts as a landmark: the blocks themselves. A toilet inside a
+# building is not a landmark, the building is -- and neither is a square, a gallery, a
+# swimming pool or a sports centre, which is what "Main Locations" is made of. That
+# category used to be included and it put "Suen Chi Sun Memorial Square" and "Block X
+# Sports Centre" on the route line beside the buildings, so the walk read as a list of
+# everything it passed rather than the blocks somebody navigates by.
+GUIDE_CATEGORY = "Buildings / Cores / Wings / Blocks"
 
 _METRES_PER_DEG_LAT = 111_320.0
 
@@ -101,7 +105,7 @@ def landmarks_along(graph: CampusGraph, route, *, within_m: float = NEAR_M,
     for node in graph.nodes.values():
         if node.id in ends or node.kind == "waypoint":
             continue
-        if (node.category or "") not in GUIDE_CATEGORIES:
+        if (node.category or "") != GUIDE_CATEGORY:
             continue
         px, py = to_xy(node.lat, node.lng)
         best_distance = within_m + 1.0

@@ -22,17 +22,90 @@ const GREETING =
   'Hi! I am PolyU Campus Navigator Chatbot. I am here to help you navigate the PolyU. ' +
   'Whether you need walking directions or an essential amenity, I have your back! ';
 
+/** Bumped when the shape below changes, so an old transcript is dropped not misread. */
+const STORAGE_KEY = 'campus-navigator/transcript/2';
+
+interface Saved {
+  messages: ChatMessage[];
+  routes: RouteOption[];
+  facilities: FacilityCard[];
+  routeMessageId: number | null;
+}
+
+function greeting(): ChatMessage {
+  return { id: 0, role: 'bot', payload: { text: GREETING, route: null, facilities: [] } };
+}
+
+/** A route as this build draws it: the numbers the map and the receipt both read. */
+function isRoute(value: unknown): boolean {
+  const route = value as Record<string, unknown> | null;
+  if (!route || typeof route !== 'object') return false;
+  if (typeof route.metres !== 'number') return false;
+  if (!Array.isArray(route.path) || !Array.isArray(route.segments)) return false;
+  return true;
+}
+
+function isMessage(value: unknown): value is ChatMessage {
+  const message = value as ChatMessage;
+  if (!message || typeof message.id !== 'number') return false;
+  if (message.role !== 'user' && message.role !== 'bot') return false;
+  if (typeof message.payload === 'string') return true;
+  if (!message.payload || typeof message.payload.text !== 'string') return false;
+  // A saved reply carries a route the map will draw and a list the chat will offer. A
+  // payload written by an older build has the same idea and a different shape, and
+  // rendering it throws -- which is a white page, not a missing detail. The version in the
+  // key is the first guard; this is the second.
+  if (message.payload.route != null && !isRoute(message.payload.route)) return false;
+  const routes = message.payload.routes;
+  if (routes != null && (!Array.isArray(routes) || !routes.every(isRoute))) return false;
+  if (message.payload.facilities != null && !Array.isArray(message.payload.facilities)) return false;
+  return true;
+}
+
+/**
+ * What the browser kept from last time.
+ *
+ * The engine remembers the conversation itself (one Dialogue per browser cookie); this is
+ * the part that survives a refresh, a reload and a closed tab, so the words on screen and
+ * the line on the map still belong to the same conversation after F5. Anything unexpected
+ * in storage means starting clean rather than throwing on the first render.
+ */
+function load(): Saved {
+  const fresh: Saved = { messages: [greeting()], routes: [], facilities: [], routeMessageId: null };
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return fresh;
+    const saved = JSON.parse(raw) as { v?: number; messages?: unknown };
+    if (saved?.v !== 1 || !Array.isArray(saved.messages)) return fresh;
+    const messages = saved.messages.filter(isMessage);
+    if (!messages.length) return fresh;
+    // Only the last reply can still be on the map, and live behaviour replaces the two
+    // panels wholesale each turn, so reading one reply restores the state exactly.
+    const last = [...messages].reverse().find((message) => message.role === 'bot');
+    const payload = last && typeof last.payload !== 'string' ? last.payload : null;
+    const routes = payload?.routes ?? [];
+    return {
+      messages,
+      routes,
+      facilities: payload?.facilities ?? [],
+      routeMessageId: routes.length && last ? last.id : null,
+    };
+  } catch {
+    return fresh;
+  }
+}
+
+const SAVED = load();
+
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
   const [engineOffline, setEngineOffline] = useState(false);
   const [graph, setGraph] = useState<Graph | null>(null);
-  const [routes, setRoutes] = useState<RouteOption[]>([]);
+  const [routes, setRoutes] = useState<RouteOption[]>(SAVED.routes);
   const [routeSelection, setRouteSelection] = useState(0);
-  const [routeMessageId, setRouteMessageId] = useState<number | null>(null);
-  const [facilities, setFacilities] = useState<FacilityCard[]>([]);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { id: 0, role: 'bot', payload: { text: GREETING, route: null, facilities: [] } },
-  ]);
+  const [routeMessageId, setRouteMessageId] = useState<number | null>(SAVED.routeMessageId);
+  const [facilities, setFacilities] = useState<FacilityCard[]>(SAVED.facilities);
+  const [messages, setMessages] = useState<ChatMessage[]>(SAVED.messages);
   const [draft, setDraft] = useState('');
   const [focusSignal, setFocusSignal] = useState(0);
   const [avatar, setAvatarState] = useState<AvatarState>('idle');
@@ -41,7 +114,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const mapRef = useRef<CampusMap | null>(null);
-  const nextId = useRef(1);
+  const nextId = useRef(SAVED.messages.reduce((n, message) => Math.max(n, message.id + 1), 1));
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
   const [dictated, setDictated] = useState(false);
@@ -136,6 +209,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: 1, messages }));
+    } catch {
+      // private mode or a full quota: the transcript is a convenience, not a dependency
+    }
+  }, [messages]);
+
+  useEffect(() => {
     // Some browsers populate their voice list only after the first request.
     window.speechSynthesis?.getVoices();
     return cancelSpeech;
@@ -153,6 +234,11 @@ export default function App() {
     setPlayHint('');
     try {
       await resetSession();
+      try {
+        window.localStorage.removeItem(STORAGE_KEY);
+      } catch {
+        // nothing was stored, so there is nothing to clear
+      }
       setMessages([]);
       setRoutes([]);
       setRouteSelection(0);

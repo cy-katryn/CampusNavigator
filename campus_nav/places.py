@@ -70,6 +70,19 @@ FACILITY_WORDS: dict[str, str] = {
     "bookstore": "bookstore", "bookshop": "bookstore",
     "lactation": "lactation room", "nursing room": "lactation room",
     "prayer": "prayer room", "prayer room": "prayer room",
+    # Errands and symptoms: the words people use for a *need* rather than a place. These
+    # lived in the model's prompt as examples to copy, which worked until the model had to
+    # pick between them and a list of amenities it could not see -- so they moved here, next
+    # to the list of services the map actually carries, where they can be read and tested.
+    "sick": "clinic", "unwell": "clinic", "ill": "clinic", "doctor": "clinic",
+    "nurse": "clinic", "medicine": "clinic", "first aid": "clinic", "injured": "clinic",
+    "injury": "clinic", "fever": "clinic", "headache": "clinic", "hurt": "clinic",
+    "print": "bookstore", "printing": "bookstore", "photocopy": "bookstore",
+    "stationery": "bookstore", "notebook": "bookstore", "art supplies": "bookstore",
+    "cash": "bank", "money": "bank", "withdraw": "bank", "cashpoint": "bank",
+    "eat": "canteen", "food": "canteen", "lunch": "canteen", "dinner": "canteen",
+    "breakfast": "canteen", "hungry": "canteen", "snack": "canteen",
+    "drink": "water_refill", "thirsty": "water_refill", "bottle": "water_refill",
 }
 
 # Wording that means "a facility", not "the building it sits in".
@@ -88,6 +101,26 @@ def label_key(text: str) -> str:
     way a corrupted key once did.
     """
     return " ".join((text or "").casefold().replace(".", " ").split())
+
+
+def amenity_in_text(text: str) -> str:
+    """The amenity wording these words contain, or "" when they name none.
+
+    This is the boundary the model used to be handed: it was given the list of amenities
+    and told to choose from it, so an activity with no label in that list ("I want to have a
+    swim") got the nearest wrong one, confidently. The list is the engine's business --
+    the engine can also see the fifty-two services the map publishes and the five hundred
+    and eighty-nine places it carries, and the model can see neither.
+
+    Longest wording first, so "water station" is not reported as "water".
+    """
+    lowered = (text or "").lower()
+    if not lowered:
+        return ""
+    for phrase in sorted(FACILITY_WORDS, key=len, reverse=True):
+        if phrase in lowered:
+            return phrase
+    return ""
 
 
 def facility_capability(word: str) -> str:

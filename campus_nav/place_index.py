@@ -42,6 +42,99 @@ MODE_LEXICAL = "lexical"
 # 0.04, "canteen" answered with a single canteen. Fifteen points keeps a tier together.
 LEXICAL_BAND = 0.15
 
+# Chinese is written without spaces, and its place names are head-final: the category word
+# comes last ("包玉剛圖書館") while a qualifier comes first ("圖書館咖啡廳", "(去顫器) 圖書館").
+# Cosine similarity does not know that, so "圖書館" came back as the café and the AED
+# inside the library and not as the library. A published name that *ends* with the phrase
+# is a name match -- the same argument as NAME_EVIDENCE, in a language where a word
+# boundary is not available.
+_CJK = re.compile(r"[\u3400-\u9fff]")
+
+# How much weaker than the best match a description's neighbour may be and still be the
+# same answer to a person. "I want to have a swim" scores 0.53 for the pool and 0.39 for the
+# nearest water fountain: both clear the "names something" floor, and only the first is an
+# answer. A tenth is wide enough to keep genuinely similar places ("sit outside and study"
+# returns a bookshop, a plaza and a study centre within 0.03 of each other) and narrow
+# enough to drop a different kind of place.
+MEANING_BAND = 0.10
+# A published name is often a code plus a bracketed name: "L座(包玉剛圖書館)". Brackets and
+# separators end a segment, so the head-final test below looks inside them too.
+_SEGMENTS = re.compile(r"[()（）\[\]【】\s·,，、]+")
+
+
+# The campus names its buildings with a kind and a code: "Core P", "Block VA", "Wing FJ".
+# One letter is all that separates any two of them, which is precisely the difference an
+# embedding cannot see -- and the difference a regex cannot miss.
+_STRUCTURAL = re.compile(r"(core|block|wing|tower)\s+([a-z]{1,3}\d?)", re.I)
+
+
+def shares_a_name_word(node: Node, words: list[str]) -> bool:
+    """Does one of these words appear in a name this place is published under?"""
+    if not words:
+        return False
+    names = [node.name or "", node.name_zh or "", node.name_zh_cn or ""]
+    for name in names:
+        candidates = lexical.normalise(name)
+        for word in words:
+            for candidate in candidates:
+                if word == candidate:
+                    return True
+                # plurals and endings: "toilets" is "Toilet (Block V)"
+                if len(word) >= 4 and len(candidate) >= 4 and (
+                    word.startswith(candidate) or candidate.startswith(word)
+                ):
+                    return True
+            # Chinese is written without spaces, so a name is one run and the test is
+            # containment
+            if _CJK.search(word) and word in name:
+                return True
+    return False
+
+
+def evidenced(hits: list[tuple[float, Node]], text: str) -> list[tuple[float, Node]]:
+    """Drop matches that nothing in the phrase accounts for.
+
+    Dense scoring always answers with neighbours, so a single unknown word lands on
+    whatever is nearest: "want" scored highest for "Block W (Industrial Centre)" and "Hi"
+    for the HTI department. Both became "which place did you mean?" -- a greeting and a
+    verb turned into place questions.
+
+    The rule that fixes it is the one the rest of this project already uses: a name has to
+    be *in* the query. A single word therefore has to appear in a published name; a longer
+    phrase is allowed to match on meaning, because describing a place in your own words is
+    the entire point of the embeddings ("somewhere to fill my bottle").
+    """
+    words = [word for word in lexical.normalise(text) if len(word) >= 2]
+    if len(words) >= 2:
+        return hits
+    return [(score, node) for score, node in hits if shares_a_name_word(node, words)]
+
+
+def cjk_named(hits: list[tuple[float, Node]], probe: str) -> list[tuple[float, Node]]:
+    """The candidates a Chinese phrase actually names, place before facility.
+
+    Cosine similarity cannot see that Chinese names are head-final in a segment: "圖書館"
+    scored 0.75 for "圖書館咖啡廳" (the café), 0.70 for "(去顫器) 圖書館" (the AED inside it)
+    and 0.69 for "L座(包玉剛圖書館)" — the library itself, third. A segment that *ends* with
+    the phrase is a name match, which is the same argument NAME_EVIDENCE makes in English.
+
+    Then, when the phrase names both a building and something standing in it, the building
+    is the answer: the follower drop in resolve() applies the same rule, but it cannot fire
+    here because these published facility records leave the parent reference empty.
+    """
+    def ends_with(name: str) -> bool:
+        return any(part.strip().endswith(probe)
+                   for part in _SEGMENTS.split(name or "") if part.strip())
+
+    named = [
+        (score, node) for score, node in hits
+        if ends_with(node.name_zh) or ends_with(node.name_zh_cn)
+    ]
+    if not named:
+        return hits
+    places = [pair for pair in named if pair[1].kind != "facility"]
+    return places or named
+
 
 class PlaceIndexError(RuntimeError):
     """The place index is not configured, empty, or does not match the graph."""
@@ -214,13 +307,101 @@ class PlaceIndex:
     # ("somewhere to fill my bottle") the embeddings are the only evidence there is.
     NAME_EVIDENCE = 0.60
 
+    def structural_places(self, text: str) -> list[Node] | None:
+        """A building named by the campus's own code convention, or None.
+
+        "Core Y" is not a place on this campus, and the embeddings answered it with Core T,
+        Core C, Core J and Core Q -- four confident wrong answers, because every core is one
+        letter from every other. Where the convention is deterministic the answer is too:
+        the phrase must be *only* the code ("Core P", not "Block X Sports Centre"), and the
+        name must be exactly it or begin with it and qualify it in brackets. A code that
+        does not exist therefore resolves to nothing, and the reply can say so.
+        """
+        phrase = " ".join(lexical.normalise(text))
+        match = _STRUCTURAL.fullmatch(phrase)
+        if not match:
+            return None
+        wanted = f"{match.group(1).title()} {match.group(2).upper()}"
+        exact: list[Node] = []
+        qualified: list[Node] = []
+        for node in self.graph.nodes.values():
+            if node.kind == "waypoint" or not node.name:
+                continue
+            name = node.name.strip()
+            if name.casefold() == wanted.casefold():
+                exact.append(node)
+            elif name.casefold().startswith(wanted.casefold() + " ("):
+                qualified.append(node)
+        return exact or qualified
+
+    def semantic_places(self, text: str, floor: float | None = None,
+                        limit: int = 5) -> list[Node]:
+        """Places that *mean* what the phrase means, strongest first.
+
+        The facility layer knows the services this map publishes -- AEDs, toilets, water,
+        catering, clinics. A wish that names none of them ("I want to have a swim",
+        "somewhere to sit outside") is not an unknown question, it is a question about a
+        *place*, and every place here is embedded. So the same nearest-neighbour search
+        that resolves names is asked by meaning, with a floor high enough that a swim
+        answers the pool rather than the sports centre next to it.
+
+        The floor is the configured one (place_min_similarity) rather than a number chosen
+        here: "somewhere to sit outside and study" scores 0.42 against the plaza, while a
+        name scores 0.9, and one threshold for "this names something at all" is the whole
+        point of having a setting.
+        """
+        if not (text or "").strip():
+            return []
+        if floor is None:
+            floor = self.settings.place_min_similarity
+        ranked = [(score, node) for score, node in self.scored(text)
+                  if score >= floor and node.kind != "waypoint"]
+        if not ranked:
+            return []
+        best = ranked[0][0]
+        found: list[Node] = []
+        for score, node in ranked:
+            if score < best - MEANING_BAND:
+                break
+            if node not in found:
+                found.append(node)
+            if len(found) >= limit:
+                break
+        return found
+
+    def coded_siblings(self, text: str) -> list[Node]:
+        """Places that do exist under the code the phrase used: "Core Y" -> Block Y.
+
+        A code that names nothing is usually the right letter on the wrong kind of
+        building, so the useful thing to offer is that letter under another head -- not
+        "Core T, Core C, Core J", which is what the embeddings propose.
+        """
+        phrase = " ".join(lexical.normalise(text))
+        match = _STRUCTURAL.fullmatch(phrase)
+        if not match:
+            return []
+        code = match.group(2).upper()
+        found: list[Node] = []
+        for node in self.graph.nodes.values():
+            if node.kind == "waypoint" or not node.name:
+                continue
+            head = _STRUCTURAL.match(" ".join(lexical.normalise(node.name)))
+            if head and head.group(2).upper() == code:
+                found.append(node)
+        return found
+
     def resolve(self, text: str) -> list[Node]:
         """The place(s) the phrase means, best first; empty when it means nothing."""
-        hits = self.scored(text)
+        structural = self.structural_places(text)
+        if structural is not None:
+            return structural
+        hits = evidenced(self.scored(text), text)
         if not hits:
             return []
 
         if self.mode == MODE_DENSE:
+            if _CJK.search(text):
+                hits = cjk_named(hits, text.strip().strip("?？。！!，, "))
             named = {node.id for score, node in lexical.resolve_scored(self.graph, text)
                      if score >= self.NAME_EVIDENCE}
             if named:
@@ -237,6 +418,23 @@ class PlaceIndex:
             if not (node.kind == "facility" and node.parent and node.parent in ids)
         ]
         hits = grouped or hits
+
+        # A name whose every word appears in the query is the name that was said: "Block X
+        # Sports Centre" is a building of its own, and answering it with "Block X" sends
+        # somebody to the block next door. Where such a name exists, the band narrows to it
+        # -- the most specific of them wins ("Block X Sports Centre" over "Block X").
+        # Nothing is narrowed when no candidate is fully covered ("library" is inside
+        # "Block L (Pao Yue-Kong Library)" but not the other way round), which is the case
+        # NAME_EVIDENCE and the lexical tiers already handle.
+        said = set(lexical.normalise(text))
+        covering = [
+            pair for pair in hits
+            if said and set(lexical.normalise(pair[1].name)) <= said
+        ]
+        if covering:
+            longest = max(len(lexical.normalise(node.name)) for _, node in covering)
+            hits = [pair for pair in covering
+                    if len(lexical.normalise(pair[1].name)) == longest]
 
         # Only the top band is an answer. A weaker neighbour is a worse guess, not an
         # alternative: "library" must not also offer "Block M". Dense scores are cosines

@@ -58,6 +58,15 @@ interface Point {
   y: number;
 }
 
+/* A published name usually carries its building in brackets: "Block V (Jockey Club
+   Innovation Tower)". On the map the block letter is already printed on the roof, so the
+   bracketed half is noise -- and at route zoom it ran across half the screen. */
+function mapLabel(name: string): string {
+  const bare = name.replace(/\s*\([^()]*\)\s*$/, '').trim();
+  const text = bare || name;
+  return text.length > 26 ? text.slice(0, 25).trimEnd() + '\u2026' : text;
+}
+
 function el(name: string, attrs: Record<string, string | number>): SVGElement {
   const node = document.createElementNS(SVG_NS, name);
   Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, String(value)));
@@ -138,7 +147,55 @@ export class CampusMap {
     this.selectedRoute = selected;
     this.renderRoutes();
     const chosen = routes[Math.max(0, Math.min(selected, routes.length - 1))];
-    if (chosen) this.fitTo(chosen.path.map((p) => this.project(p.lat, p.lng)));
+    if (chosen) this.fitTo(this.routeExtent(chosen));
+  }
+
+  /**
+   * Everything the chosen route puts on screen: every point of the drawn line, plus its
+   * landmarks. Fitting to the two endpoints alone framed a straight line through the
+   * buildings and let a walk that bends around them run off the edge -- which is also why
+   * the labels looked enormous: the view was zoomed further in than the route.
+   */
+  private routeExtent(route: RouteOption): Point[] {
+    const points: Point[] = [];
+    (route.segments || []).forEach((segment) => {
+      (segment.path || []).forEach(([lat, lng]) => points.push(this.project(lat, lng)));
+    });
+    (route.landmarks || []).forEach((mark) => points.push(this.project(mark.lat, mark.lng)));
+    if (!points.length) {
+      (route.path || []).forEach((p) => points.push(this.project(p.lat, p.lng)));
+    }
+    return points;
+  }
+
+  /** The point "metres" along a projected line. Map units are metres on the ground. */
+  private pointAlong(points: Point[], metres: number): Point {
+    if (!points.length) return { x: 0, y: 0 };
+    let left = Math.max(0, metres);
+    for (let index = 1; index < points.length; index += 1) {
+      const from = points[index - 1];
+      const to = points[index];
+      const length = Math.hypot(to.x - from.x, to.y - from.y);
+      if (length <= 0) continue;
+      if (left <= length) {
+        const t = left / length;
+        return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
+      }
+      left -= length;
+    }
+    return points[points.length - 1];
+  }
+
+  /** A label that stays on the canvas: near the right edge it flips to the other side. */
+  private routeLabel(x: number, y: number, text: string, extra = ''): SVGElement {
+    const label = el('text', { x: x + 6, y, class: 'node-label route-label ' + extra });
+    label.textContent = text;
+    // about 5.6 map units per character: an estimate, used only to decide the flip
+    if (x + 6 + text.length * 5.6 > this.view.x + this.view.w) {
+      label.setAttribute('x', String(x - 6));
+      label.setAttribute('text-anchor', 'end');
+    }
+    return label;
   }
 
   /** The route layer alone: called again when only the zoom (and so the pin size) moved. */
@@ -190,40 +247,49 @@ export class CampusMap {
       if (!isChosen) return;
       // The waypoints are bends in a walkway, so the line itself carries no names. The
       // buildings it passes do, and they are what a person recognises on the way, so the
-      // chosen route is annotated with them.
+      // chosen route is annotated with them -- at the point on the walk where you pass
+      // them. The engine measured that distance already (at_m), and the drawn line is in
+      // metres, so the dot lands on the path instead of on the building's published
+      // centre, which can be twenty metres away and left the dots floating beside it.
+      const marks: { x: number; y: number; name: string }[] = [];
       (route.landmarks || []).forEach((mark) => {
-        const at = this.project(mark.lat, mark.lng);
-        // In map units, like every other mark: 4.2 is about 8 m across, which reads at
-        // campus zoom. At 1.9 the dot vanished under the route line it sits on.
-        layer.appendChild(
-          el('circle', { cx: at.x, cy: at.y, r: 4.2, class: 'route-landmark-dot' }),
-        );
-        const label = el('text', {
-          x: at.x + 5,
-          y: at.y + 10,
-          // route-label keeps it visible at every zoom: applyView() hides plain node
-          // labels when the view is wide, and a landmark you cannot see is not a landmark.
-          class: 'node-label route-label route-landmark',
-        });
-        label.textContent = mark.name;
+        const at = this.pointAlong(points, mark.at_m);
+        // Two POIs inside one building share a published coordinate and so a distance
+        // along the walk ("Block V" and "Innovation Gallery" are the same point). One dot
+        // and one name is what the map can honestly show.
+        if (marks.some((other) => Math.hypot(other.x - at.x, other.y - at.y) < 8)) return;
+        marks.push({ x: at.x, y: at.y, name: mapLabel(mark.name) });
+      });
+      marks.forEach((mark, index) => {
+        // In map units, like every other mark: 3.4 is about 7 m across.
+        const dot = el('circle', { cx: mark.x, cy: mark.y, r: 3.4, class: 'route-landmark-dot' });
+        // In the line's own colour. The stylesheet's default is route 1, so a landmark on
+        // the second or third option used to stay navy -- a dot in the wrong colour reads as
+        // belonging to the wrong walk, and the whole point of the annotation is which walk
+        // it belongs to.
+        dot.setAttribute('style', 'fill: ' + colour);
+        layer.appendChild(dot);
+        // alternate above and below the line, so neighbouring names do not stack up
+        const side = index % 2 === 0 ? -7 : 12;
+        const label = this.routeLabel(mark.x, mark.y + side, mark.name, 'route-landmark');
+        label.setAttribute('style', 'fill: ' + colour);
         layer.appendChild(label);
       });
       route.path.forEach((point, i) => {
         const xy = dots[i];
-        layer.appendChild(
-          el('circle', { cx: xy.x, cy: xy.y, r: i === 0 ? 4.5 : 3, class: 'route-dot' }),
-        );
-        layer.appendChild(
-          el('circle', { cx: xy.x, cy: xy.y, r: i === 0 ? 2 : 1.5, class: 'route-pin' }),
-        );
+        // The stops and the ends carry the route's colour too, for the same reason.
+        const ring = el('circle', { cx: xy.x, cy: xy.y, r: i === 0 ? 4.5 : 3, class: 'route-dot' });
+        ring.setAttribute('style', 'stroke: ' + colour);
+        layer.appendChild(ring);
+        const pin = el('circle', { cx: xy.x, cy: xy.y, r: i === 0 ? 2 : 1.5, class: 'route-pin' });
+        pin.setAttribute('style', 'fill: ' + colour);
+        layer.appendChild(pin);
         if (i === 0 || i === route.path.length - 1) {
-          const label = el('text', {
-            x: xy.x + 6,
-            y: xy.y - 5,
-            class: 'node-label route-label',
-          });
-          label.textContent = (i === 0 ? 'START · ' : 'GOAL · ') + point.name;
-          layer.appendChild(label);
+          // the short name: the full published one is a third of the screen at this zoom
+          layer.appendChild(
+            this.routeLabel(xy.x, xy.y - 6,
+              (i === 0 ? 'START · ' : 'GOAL · ') + mapLabel(point.name)),
+          );
         }
       });
     });

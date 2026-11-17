@@ -36,9 +36,11 @@ import argparse
 import json
 import mimetypes
 import os
+import secrets
 import sys
 import threading
 import webbrowser
+from collections import OrderedDict
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -238,11 +240,9 @@ def route_option(graph: CampusGraph, route, lang: str = "en-US") -> dict | None:
     if route is None or not route.reachable or len(route.path) < 2:
         return None
     places = [node for node in route.path if graph.node(node).kind != "waypoint"]
-    # the first real place after the start is the honest answer to "which way is this?"
-    via = ""
-    for node in places[1:-1]:
-        via = place_name(graph, node, lang)
-        break
+    # The real places between the ends: the stops of a via journey, named in order, so the
+    # chooser says which walk it is ("via Core P, then Block L") instead of only the first.
+    via = ", ".join(place_name(graph, node, lang) for node in places[1:-1][:2])
     return {
         "metres": round(route.total_metres, 1),
         "legs": max(len(places) - 1, 1),
@@ -371,6 +371,12 @@ def chat_payload(graph: CampusGraph, reply, lang: str = "en-US") -> dict:
     if facility_lead or (lang in ("zh-HK", "zh-CN") and not explicit and (clarification or route is not None)):
         speech_lang = lang
     speech = facility_lead or spoken_summary(reply, graph, speech_lang)
+    # A reply may insist on one fact first ("Closed Catering Outlets."). It is part of the
+    # answer, not a detail, so it leads and it is spoken; the wording is the handler's, so
+    # the lead cannot drift from what actually changed.
+    lead_prefix = (getattr(reply, "lead_prefix", "") or "").strip()
+    if lead_prefix and speech:
+        speech = lead_prefix + " " + speech
     # A reply that carries a route or a list of places has a short, friendly summary
     # (the same sentence that gets spoken). The UI leads with that and puts the
     # segment table / A* statistics behind a details toggle, so the interface does not
@@ -458,8 +464,27 @@ class App:
         narrator = Narrator(client) if self.settings.narration_available else None
         self.places = PlaceIndex(self.graph, self.settings)
         self.index_info = self.places.check()
-        self.dialogue = Dialogue(self.graph, client, narrator, knowledge=self.knowledge,
-                                 places=self.places)
+        # The graph, the knowledge base and the place index are shared: read-only and
+        # expensive. The *conversation* is not shared -- two browsers, or two tabs, must
+        # not overwrite each other's origin, destination or closures.
+        self.client = client
+        self.narrator = narrator
+        self._dialogues: OrderedDict[str, Dialogue] = OrderedDict()
+
+    MAX_SESSIONS = 32
+
+    def dialogue_for(self, session: str) -> Dialogue:
+        """This browser's conversation, created on first use and remembered after."""
+        found = self._dialogues.get(session)
+        if found is not None:
+            self._dialogues.move_to_end(session)
+            return found
+        dialogue = Dialogue(self.graph, self.client, self.narrator,
+                            knowledge=self.knowledge, places=self.places)
+        self._dialogues[session] = dialogue
+        while len(self._dialogues) > self.MAX_SESSIONS:
+            self._dialogues.popitem(last=False)      # oldest browser loses its state
+        return dialogue
 
     def apply_settings(self, api_key: str | None = None, model: str | None = None,
                        *, embeddings_api_key: str | None = None,
@@ -489,8 +514,10 @@ class App:
 
         client = DeepSeekClient(self.settings) if self.settings.llm_available else None
         narrator = Narrator(client) if self.settings.narration_available else None
-        self.dialogue.client = client
-        self.dialogue.narrator = narrator
+        self.client, self.narrator = client, narrator
+        for dialogue in self._dialogues.values():
+            dialogue.client = client
+            dialogue.narrator = narrator
 
         # A new embeddings or vector-store key changes how place names are resolved, so
         # the index is re-probed now: the very next message uses the new path instead of
@@ -570,6 +597,27 @@ class Handler(BaseHTTPRequestHandler):
     app: App  # injected by serve()
 
     server_version = "CampusNavigator/1.0"
+    SESSION_COOKIE = "campus_session"
+
+    # -- session -----------------------------------------------------------
+    def _session(self) -> str:
+        """This browser's conversation id, minted on the first request it makes.
+
+        A cookie, because the alternative is one conversation for the whole server: with a
+        single Dialogue two tabs shared one origin, and "from block L instead" in one tab
+        moved the other. The cookie is opaque and per-browser; the state it points at never
+        leaves this process.
+        """
+        if getattr(self, "_sid", None):
+            return self._sid
+        for part in (self.headers.get("Cookie") or "").split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == self.SESSION_COOKIE and value:
+                self._sid, self._fresh = value, False
+                return value
+        self._sid = secrets.token_urlsafe(12)
+        self._fresh = True
+        return self._sid
 
     # -- helpers -----------------------------------------------------------
     def _send(self, code: int, body: bytes, content_type: str = "application/json; charset=utf-8") -> None:
@@ -577,6 +625,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if getattr(self, "_fresh", False):
+            self.send_header(
+                "Set-Cookie",
+                f"{self.SESSION_COOKIE}={self._session()}; Path=/; SameSite=Lax; HttpOnly",
+            )
+            self._fresh = False
         self.end_headers()
         self.wfile.write(body)
 
@@ -627,7 +681,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/route-draft":
                 try:
                     with LOCK:
-                        draft = self.app.dialogue.draft_endpoints(text)
+                        draft = self.app.dialogue_for(self._session()).draft_endpoints(text)
                 except (PlaceIndexError, EmbeddingError, PineconeError) as exc:
                     return self._json({"error": f"place index unavailable: {exc}"}, 502)
                 if draft is None:
@@ -637,7 +691,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"is_route": True, **draft})
             try:
                 with LOCK:
-                    reply = self.app.dialogue.handle(text, endpoints=payload.get("endpoints"))
+                    reply = self.app.dialogue_for(self._session()).handle(
+                        text, endpoints=payload.get("endpoints"))
             except ValueError as exc:
                 return self._json({"error": str(exc)}, 400)
             except (PlaceIndexError, EmbeddingError, PineconeError) as exc:
@@ -677,7 +732,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "status": status, "env": str(ENV_PATH.name)})
         if path == "/api/reset":
             with LOCK:
-                self.app.dialogue.state = type(self.app.dialogue.state)()
+                dialogue = self.app.dialogue_for(self._session())
+                dialogue.state = type(dialogue.state)()
             return self._json({"ok": True})
         return self._json({"error": "not found"}, 404)
 
@@ -715,6 +771,22 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, target.read_bytes(), ctype)
 
 
+class _Server(ThreadingHTTPServer):
+    """A server that will not share its port.
+
+    On Windows, SO_REUSEADDR -- which ThreadingHTTPServer sets for you -- lets a second
+    process bind a port that is already listening. Both sockets appear in netstat and the
+    OS hands each connection to either one, so a stale copy answers some requests and the
+    code that runs is not the code on disk. This bit during development: the fixes below
+    were live on disk and a server an hour old kept answering. Turning the option off makes
+    the second start fail with "address already in use", which is the answer a developer
+    wants. Linux does not need the option to be off (its SO_REUSEADDR cannot steal a live
+    listener), so the change is Windows-only and restart-after-crash still works.
+    """
+    if os.name == "nt":
+        allow_reuse_address = False
+
+
 def serve(port: int | None = None, host: str | None = None,
           open_browser: bool = False) -> int:
     port = port or int(os.environ.get("PORT") or 8000)
@@ -727,7 +799,13 @@ def serve(port: int | None = None, host: str | None = None,
         print(f"startup failed: {exc}", file=sys.stderr)
         return 2
     Handler.app = app
-    httpd = ThreadingHTTPServer((host, port), Handler)
+    try:
+        httpd = _Server((host, port), Handler)
+    except OSError as exc:
+        # Saying so beats serving stale code from a copy nobody can see.
+        print(f"cannot listen on {host}:{port} ({exc}); is another copy already running?",
+              file=sys.stderr)
+        return 3
     url = f"http://{host}:{port}/"
     print("=" * 66)
     print("  COMP4431 Group 21 - Campus Navigator (web)")

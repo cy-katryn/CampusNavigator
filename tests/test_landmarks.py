@@ -11,7 +11,7 @@ import unittest
 
 from campus_nav.config import graph_path
 from campus_nav.graph import CampusGraph
-from campus_nav.landmarks import GUIDE_CATEGORIES, MAX_LANDMARKS, NEAR_M, landmarks_along
+from campus_nav.landmarks import GUIDE_CATEGORY, MAX_LANDMARKS, NEAR_M, landmarks_along
 from campus_nav.search import search
 
 
@@ -47,7 +47,22 @@ class LandmarkTests(unittest.TestCase):
         for mark in landmarks_along(self.graph, self.route):
             node = self.graph.node(mark["id"])
             self.assertNotEqual(node.kind, "waypoint", node.name)
-            self.assertIn(node.category, GUIDE_CATEGORIES, node.name)
+            self.assertEqual(node.category, GUIDE_CATEGORY, node.name)
+
+    def test_only_buildings_are_landmarks_never_squares_or_galleries(self) -> None:
+        # "Main Locations" is squares, galleries, pools and sports centres. Including it
+        # put "Suen Chi Sun Memorial Square" and "Block X Sports Centre" beside the blocks
+        # the walk passes, so the annotation read as everything the street offered.
+        for mark in landmarks_along(self.graph, self.route):
+            self.assertEqual(self.graph.node(mark["id"]).category,
+                             "Buildings / Cores / Wings / Blocks", mark["name"])
+        crossed = {
+            node.name
+            for node in self.graph.nodes.values()
+            if node.category == "Main Locations"
+        }
+        listed = {mark["name"] for mark in landmarks_along(self.graph, self.route)}
+        self.assertEqual(crossed & listed, set())
 
     def test_the_endpoints_are_not_listed_as_landmarks(self) -> None:
         ids = {mark["id"] for mark in landmarks_along(self.graph, self.route)}

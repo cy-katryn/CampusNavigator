@@ -12,21 +12,24 @@ are implemented explicitly rather than left to the language model:
 """
 from __future__ import annotations
 
+import difflib
 import re
 from dataclasses import dataclass, field
 
 from .config import RAW_DIR, get_settings
 from .facility_speech import FacilityResult, requested_day
+from . import lexical
 from .graph import CampusGraph, Node
 from .kb import KnowledgeBase, hours_summary, open_state, today_hours
 from .landmarks import landmarks_along
 from .llm import DeepSeekClient
 from .narrate import Facts, Narration, Narrator
-from .nlu import (REOPEN, Slots, names_destination, parse, parse_with_grammar,
-                  refers_to_last_distance, stair_request)
+from .nlu import (REOPEN, Slots, asks_for_everything, facility_words, names_destination,
+                  parse, parse_with_grammar, refers_to_last_distance, stair_request)
 from .place_index import PlaceIndex
 from .places import (
     SERVICE_WORDS,
+    amenity_in_text,
     facility_capability,
     human_category,
 )
@@ -59,6 +62,10 @@ class Reply:
     # reading the printed table aloud is unlistenable and guessing here would let the
     # audio drift from the screen.
     spoken: str = ""
+    # A one-line fact this reply has to lead with, whatever the prose says. A closure is
+    # the reason a route changed, so "Closed Catering Outlets." goes first, in one fixed
+    # wording -- leaving it in the collapsed details hid the cause of the answer.
+    lead_prefix: str = ""
     clarification: RouteClarification | None = None
     facility_result: FacilityResult | None = None
 
@@ -111,6 +118,16 @@ def place_legs(graph: CampusGraph, route: RouteResult) -> list[tuple[str, str, f
     return legs
 
 
+# A comfortable campus walking pace: 4.5 km/h. Used only to turn the measured metres into
+# "about N minutes", which is the number a person actually plans with.
+WALK_MPS = 1.25
+
+
+def walk_minutes(metres: float) -> int:
+    """Minutes at a comfortable pace, never less than one."""
+    return max(1, round(metres / WALK_MPS / 60))
+
+
 def fmt_route(graph: CampusGraph, route: RouteResult) -> str:
     """The route as a person reads it: legs between PLACES."""
     if not route.reachable:
@@ -136,6 +153,7 @@ def fmt_route(graph: CampusGraph, route: RouteResult) -> str:
     )
     lines.append(
         f"Total: {route.total_metres:.0f} m over {count} leg{'s' if count != 1 else ''}{extras}"
+        f" (about {walk_minutes(route.total_metres)} min at an easy pace)"
     )
     if stats:
         lines.append(
@@ -150,6 +168,23 @@ def fmt_route(graph: CampusGraph, route: RouteResult) -> str:
 _STEP_FREE = re.compile(
     r"\b(stairs?|stairway|steps|step[- ]free|wheelchair|barrier[- ]free|"
     r"lift|lifts|elevator|escalator|accessible route|trolley)\b",
+    re.I,
+)
+
+
+# A greeting is not a place question. "Hi" reached the resolver, which found the HTI
+# department and asked which of three places the user meant -- so this is answered before
+# anything is parsed. Only a message that is *nothing but* a greeting matches.
+_GREETING = re.compile(
+    r"^(?:hi+|hiya|hey+|hello+|yo|howdy|greetings|goods+(?:morning|afternoon|evening)|"
+    r"hows+ares+you(?:s+doing)?|nices+tos+meets+you|哈囉|哈罗|你好|您好|早晨|"
+    r"嗨|喂)"
+    r"[s!,.?。，！？~]*$",
+    re.I,
+)
+_THANKS = re.compile(
+    r"^(?:thanks|thanks+you|thx|ty|cheers|gots+it|perfect|great|nice|"
+    r"唔該|多谢|多謝|谢谢|謝s*謝)[s!,.?。，！？~]*$",
     re.I,
 )
 
@@ -188,7 +223,15 @@ class Dialogue:
 
     # -- public ------------------------------------------------------------
     def _interpret_pending_place(self, text: str, slots: Slots) -> None:
-        """A bare place name answers the last question about a missing endpoint."""
+        """A bare place name answers the last question about a missing endpoint.
+
+        "Bare" is doing work here: the pending question swallows whatever arrives next, so
+        "but I want to make sure I pass through Core P on the way" was read as an answer
+        about a place called "want". A sentence that long is not a name -- it goes to the
+        parser, where a stop and a re-plan are understood.
+        """
+        if len(re.findall(r"[\w']+", text or "")) > 6:
+            return
         if (self.state.pending and text and slots.intent in ("route", "out_of_scope")
                 and (slots.avoid_stairs is None or slots.mentions_places or self._preferred_matches(text))
                 and not slots.origin_text and not names_destination(text, self.places)):
@@ -230,6 +273,15 @@ class Dialogue:
         return endpoints
 
     def handle(self, text: str, *, endpoints: dict | None = None) -> Reply:
+        if endpoints is None and _GREETING.match(text.strip()):
+            warm = ", ".join(self._warm_examples())
+            return Reply(
+                "Hi! Tell me where you are and where you want to go -- or ask me to find "
+                f"something ({warm}).",
+                notes=["greeting"],
+            )
+        if endpoints is None and _THANKS.match(text.strip()):
+            return Reply("Any time. Where next?", notes=["greeting"])
         if endpoints is None:
             slots = parse(text, self.graph, self.client, self.places)
             self._interpret_pending_place(stair_request(text)[0], slots)
@@ -257,6 +309,12 @@ class Dialogue:
         if slots.facility_choice is not None:
             return self._facility_choice(slots)
         if intent in ("facility_query", "hours_query"):
+            # The single place where a user's words become a service lookup. The model used
+            # to fill this slot from a list it was shown, and "I want to have a swim" arrived
+            # as "water station" -- a wrong answer stated confidently. Now the model reports
+            # the words and this line decides, from the map's own vocabulary.
+            if not slots.item:
+                slots.item = amenity_in_text(slots.need or slots.subject)
             reply = self._hours(slots) if intent == "hours_query" else self._facilities(slots)
             if reply.facility_result:
                 self.state.last_facilities = reply.facility_result
@@ -307,6 +365,10 @@ class Dialogue:
         )
 
     # -- pieces ------------------------------------------------------------
+    def _warm_examples(self) -> list[str]:
+        """Three real amenity words from this map, for the greeting."""
+        return facility_words(self.graph)[:3] or ["a nearby amenity"]
+
     def _help(self) -> Reply:
         return Reply(
             "I can do three things:\n"
@@ -331,7 +393,7 @@ class Dialogue:
         Three ways to be understood, in order of precision:
           1. an edge id            "close E123"
           2. two places            "the link between Core C and Core D is closed"
-          3. one place             "the library is closed today"
+          3. one place             "the library is closed today", "the bookshop is closed"
         Anything vaguer gets a question instead of a guess -- closing the wrong
         part of the map would silently invalidate every later answer.
         """
@@ -357,9 +419,20 @@ class Dialogue:
                     f"({self.graph.node(edge.u).name} - {self.graph.node(edge.v).name})."
                 )
 
-        # 2) two places -> the link that joins them
-        places = [n for n in self._preferred_matches(text) if n.kind != "facility"]
+        # 2) two places -> the link that joins them. Facilities count: closing one is a
+        # real request ("the bookshop is closed"), and a facility node sits off the walkway,
+        # so blocking it only affects routes that end there. Where the phrase matches
+        # several places the reply names them and asks, exactly as routing does.
+        places = self._preferred_matches(text)
         if len(places) >= 2:
+            # Name them in the order the user wrote them ("the link between Core C and Core
+            # D"), not in the resolver's confidence order, which is not a fact about the
+            # sentence and reads as a mistake when it disagrees with it.
+            lowered_text = text.lower()
+            places = sorted(
+                places[:2],
+                key=lambda node: lowered_text.find(node.name.lower()) % (len(lowered_text) + 1),
+            )
             ids = {
                 e.id for e in self.graph.edges
                 if {e.u, e.v} == {places[0].id, places[1].id}
@@ -370,11 +443,35 @@ class Dialogue:
                     f"Closed the link between {places[0].name} and {places[1].name} "
                     f"({', '.join(sorted(ids))})."
                 )
+            # Two named places are usually joined by a *stretch of walkway*, not one drawn
+            # link: Core C to Core D is five links and 55 m. Requiring a single link meant
+            # "the link between Core C and Core D is closed" -- the most natural way anybody
+            # describes a closure here -- closed nothing at all. "The link between them" is
+            # that stretch, so the stretch is what closes. Capped, because naming two distant
+            # buildings should not silently shut half the campus.
+            stretch = search(self.graph, places[0].id, places[1].id,
+                             closed_edges=self.state.closed_edges,
+                             closed_nodes=self._blocked(),
+                             avoid_stairs=self.state.avoid_stairs)
+            if stretch.reachable and stretch.segments and len(stretch.segments) <= 8:
+                closed = {segment.edge_id for segment in stretch.segments}
+                self.state.closed_edges |= closed
+                return (
+                    f"Closed the {len(closed)} links between {places[0].name} and "
+                    f"{places[1].name}: the whole {stretch.total_metres:.0f} m stretch "
+                    "between them, which is what a link between two places means here."
+                )
 
         # 3) one place -> close the place itself
         if len(places) == 1:
             self.state.closed_nodes.add(places[0].id)
             return f"Closed {places[0].name}."
+        # More than one place, and no link between the first two: the phrase was ambiguous
+        # ("the canteen is closed" -- this campus has three). Naming the candidates is more
+        # useful than "I could not tell", and closing a guess would invalidate later answers.
+        if len(places) > 1:
+            names = ", ".join(node.name for node in places[:4])
+            return f'"{text}" could be several places: {names}. Which one is closed?'
 
         return "I could not tell which place or link you mean, so nothing changed."
 
@@ -411,6 +508,9 @@ class Dialogue:
             prompt = f'"{query}" could be several places: {", ".join(candidates)}. Which one?'
         elif query:
             prompt = f'I do not know "{query}". Which {role} do you mean?'
+            near = self._near_names(query)
+            if near:
+                prompt += " Did you mean " + ", ".join(near) + "?"
         elif role == "origin":
             prompt = "Where are you starting from?"
         else:
@@ -419,6 +519,51 @@ class Dialogue:
             other_role = "Destination" if role == "origin" else "Starting point"
             prompt += f" {other_role}: {known}."
         return Reply(prompt, clarification=clarification)
+
+    def _near_names(self, text: str, limit: int = 3) -> list[str]:
+        """The closest published names to a phrase the resolver would not accept.
+
+        A zero match is not the moment to stop talking: "block b" should come back with
+        "Block B", not with a lecture about what the map covers.
+        """
+        if not (text or "").strip():
+            return []
+        # A structural code that names nothing is a letter, not a meaning: offering the
+        # same letter under another head is what a person would say ("there is no Core Y,
+        # there is a Block Y"), and it is the one suggestion the scorer cannot make.
+        siblings = self.places.coded_siblings(text)
+        if siblings:
+            return [node.name for node in siblings][:limit]
+        try:
+            hits = self.places.scored(text)
+        except Exception:      # a dead index must not turn a refusal into a 500
+            return []
+        names: list[str] = []
+        for _score, node in hits:
+            if node.name and node.name not in names:
+                names.append(node.name)
+            if len(names) >= limit:
+                break
+        if names:
+            return names
+        # Nothing scored, which is what the built-in scorer does for a word it has never
+        # seen: it has no notion of a near miss, and a near miss is the whole point here.
+        # Spelling is enough -- "libarry" is one transposition from a place on this map --
+        # and comparing a handful of words against the published vocabulary costs nothing.
+        vocabulary: dict[str, str] = {}
+        for node in self.graph.nodes.values():
+            for word in lexical.normalise(node.name or ""):
+                vocabulary.setdefault(word, node.name)
+        for said in lexical.normalise(text):
+            if len(said) < 4:
+                continue
+            for match in difflib.get_close_matches(said, vocabulary, n=1, cutoff=0.75):
+                name = vocabulary[match]
+                if name and name not in names:
+                    names.append(name)
+            if len(names) >= limit:
+                break
+        return names
 
     def _indoor_text(self, node_id: str) -> str:
         """What to say when the destination is inside a building.
@@ -519,53 +664,99 @@ class Dialogue:
                 break
         return options
 
-    def _via_stop(self, slots: Slots, origin: str, goal: str) -> tuple[str, str]:
-        """The place the user asked to walk through, plus a note when it cannot be used.
+    def _via_stops(self, slots: Slots, origin: str, goal: str) -> tuple[list[str], str]:
+        """The places the user asked to walk through, in order, plus a note for any lost.
 
-        A stop that names nothing, names several places, or duplicates an endpoint is not
-        an error worth failing on: the note explains it and the direct route still runs.
+        A stop that names nothing, names several places, or duplicates an endpoint is not an
+        error worth failing on: the note explains it and the rest of the walk still runs.
+        Skipping an ambiguous one is deliberate -- going through whichever of three canteens
+        the score happened to prefer would be a guess dressed as an answer.
         """
-        text = (getattr(slots, "via_text", "") or "").strip()
-        if not text:
-            return "", ""
-        hits = self._preferred_matches(text)
-        if not hits:
-            return "", f'There is no place called "{text}" here, so this is the direct route.'
-        if len(hits) > 1:
-            options = ", ".join(node.name for node in hits[:3])
-            return "", f'"{text}" could be {options}. Ask again naming one, or I will route directly.'
-        stop = hits[0].id
-        if stop in (origin, goal):
-            return "", ""
-        return stop, ""
+        notes: list[str] = []
+        stops: list[str] = []
+        for phrase in (getattr(slots, "vias", []) or []):
+            text = (phrase or "").strip()
+            if not text:
+                continue
+            hits = self._preferred_matches(text)
+            if not hits:
+                notes.append(f'There is no place called "{text}" here, so the route skips it.')
+                continue
+            if len(hits) > 1:
+                names = ", ".join(node.name for node in hits[:3])
+                notes.append(f'"{text}" could be {names}; name one and I will put it on the way.')
+                continue
+            stop = hits[0].id
+            if stop in (origin, goal) or stop in stops:
+                continue
+            stops.append(stop)
+        return stops, " ".join(notes)
 
-    def _routed_via(self, origin: str, stop: str, goal: str) -> list[RouteResult]:
-        """One route through a named stop: two A* searches, joined end to end.
+    def _join(self, legs: list[RouteResult]) -> RouteResult:
+        """Several searches stitched into one walk: the stop appears once, in order.
 
-        No alternatives are offered for a journey with a stop. Each extra option would be
-        a different pair of searches, and "the second best way through Core P" is not a
-        question anybody asked; the stop is the interesting part of the answer.
+        Everything downstream -- the leg count, the metre total, the drawn line, the spoken
+        summary, the landmarks -- reads the joined result, so nothing has to know that it
+        was more than one search.
         """
-        first = self._best_route(origin, stop)
-        if not first.reachable:
-            return [first]
-        second = self._best_route(stop, goal)
-        if not second.reachable:
-            return [second]
-        return [
-            RouteResult(
-                reachable=True,
-                algorithm="astar",
-                # The stop appears once, and it is a named node, so the leg count in the
-                # reply (2) and the drawn line both come from the joined path itself.
-                path=list(first.path) + list(second.path)[1:],
-                total_metres=first.total_metres + second.total_metres,
-                segments=list(first.segments) + list(second.segments),
-                stats=None,          # two searches: a single node count would be a fiction
-                explain=first.explain,
-                blocking={**first.blocking, **second.blocking},
-            )
-        ]
+        path: list[str] = []
+        segments = []
+        for leg in legs:
+            path.extend(leg.path if not path else leg.path[1:])
+            segments.extend(leg.segments)
+        return RouteResult(
+            reachable=True,
+            algorithm="astar",
+            path=path,
+            total_metres=sum(leg.total_metres for leg in legs),
+            segments=segments,
+            stats=None,          # several searches: a single node count would be a fiction
+            # and neither is one search's expansion list: the trace is a claim about how the
+            # answer was found, and this answer was found more than once. Empty, so the UI
+            # shows the legs and the totals without pretending there was one A* run.
+            explain=[],
+            blocking={key: value for leg in legs for key, value in leg.blocking.items()},
+        )
+
+    def _routed_via(self, origin: str, stops: list[str], goal: str,
+                    limit: int = 3) -> list[RouteResult]:
+        """A walk through every stop in order, with the alternatives that exist.
+
+        Each leg is searched on its own -- origin to the first stop, then stop to stop, then
+        the last stop to the goal. That is the only honest way to force a visit: closing the
+        stop node would forbid passing through it, and closing an edge would forbid one way
+        in.
+
+        Alternatives come from swapping ONE leg for its next-best route, not from the cross
+        product of every leg: three ways per leg over four legs is eighty-one journeys, and
+        "the third-best way out of the second stop" is not an option anybody asked for. One
+        swap at a time gives the genuinely different shapes -- a different way to reach the
+        first stop, a different way out of the last -- and keeps the list short enough to
+        choose from.
+        """
+        waypoints = [origin, *stops, goal]
+        legs = [self._route_options(a, b, limit=limit)
+                for a, b in zip(waypoints, waypoints[1:])]
+        for options in legs:
+            if not options or not options[0].reachable:
+                # the leg that fails is the answer: it says which part of the walk is blocked
+                return [options[0]] if options else []
+        best = [options[0] for options in legs]
+        primary = self._join(best)
+        routes = [primary]
+        seen = {tuple(primary.path)}
+        for index, options in enumerate(legs):
+            for alternative in options[1:]:
+                combination = list(best)
+                combination[index] = alternative
+                route = self._join(combination)
+                key = tuple(route.path)
+                if key in seen:
+                    continue
+                seen.add(key)
+                routes.append(route)
+        routes.sort(key=lambda route: route.total_metres)
+        return routes[:limit]
 
     def _describe_alternatives(self, routes: list[RouteResult]) -> str:
         """One line per alternative, in the text, for the terminal and for search."""
@@ -598,13 +789,23 @@ class Dialogue:
         origin, destination = self.state.origin, self.state.destination
         if origin and origin == destination:
             # "from VA to Core H" collapsing onto one node is not a 0 m journey, it is a
-            # failed reading of the sentence. Say so instead of drawing nothing.
+            # failed reading of the sentence. Two different situations live here, and they
+            # need different answers: if the sentence named no endpoint at all, the user is
+            # asking about the place they are standing at ("where can I swim?" while at the
+            # pool), which is a question, not a broken route.
             self.state.destination = None
+            where = self.graph.node(origin).name
+            if not slots.mentions_places and not slots.vias:
+                self.state.pending = None
+                return Reply(
+                    (prefix + "\n" if prefix else "")
+                    + f"You are at {where}. Where would you like to go?",
+                    slots=slots,
+                )
             self.state.pending = "destination"
             return Reply(
                 (prefix + "\n" if prefix else "")
-                + f"Both ends came out as {self.graph.node(origin).name}. "
-                "Where would you like to go instead?",
+                + f"Both ends came out as {where}. Where would you like to go instead?",
                 slots=slots,
             )
 
@@ -642,9 +843,9 @@ class Dialogue:
         # A stop on the way is two searches stitched into one walk: into the stop, then
         # out of it. Everything downstream (leg count, metre total, the drawn line, the
         # spoken summary) reads the joined result, so nothing has to know it was two.
-        stop, via_note = self._via_stop(slots, origin, goal)
-        if stop:
-            routes = self._routed_via(origin, stop, goal)
+        stops, via_note = self._via_stops(slots, origin, goal)
+        if stops:
+            routes = self._routed_via(origin, stops, goal)
         else:
             routes = self._route_options(origin, goal)
         route = routes[0]
@@ -681,6 +882,7 @@ class Dialogue:
                 # the template stays behind the details toggle. Prepending it to the text
                 # showed the same answer twice in two wordings.
                 spoken=narration.text if narration.ok else "",
+                lead_prefix=prefix,
             )
             self._attach_narration(reply, narration)
             return reply
@@ -729,6 +931,7 @@ class Dialogue:
             (prefix + "\n" if prefix else "") + text,
             route=route, slots=slots, notes=notes, comparison=comparison, routes=routes,
             spoken=narration.text if narration.ok else "",
+            lead_prefix=prefix,
         )
         self._attach_narration(reply, narration)
         return reply
@@ -760,6 +963,7 @@ class Dialogue:
             destination=self.graph.node(destination).name,
             reachable=route.reachable,
             total_metres=route.total_metres if route.reachable else None,
+            walk_minutes=walk_minutes(route.total_metres) if route.reachable else None,
             segment_lines=segments,
             segment_metres=[metres for _, _, metres, _ in legs],
             constraints=constraints,
@@ -906,8 +1110,12 @@ class Dialogue:
         raw = (slots.item or "").strip().lower()
         wants_service = any(w in raw for w in SERVICE_WORDS) or bool(facility_capability(raw) != raw)
 
-        if not raw:
-            # No subject named: summarise what exists instead of dumping every bin.
+        subject = (raw or (slots.subject or "")).strip()
+        if not raw and (not subject or asks_for_everything(subject)):
+            # An explicit request for the catalogue ("what facilities are there?") gets the
+            # catalogue. A description ("somewhere to sit outside and study") reaches the
+            # search below instead -- the model leaves "item" empty for both, and listing
+            # forty amenities at somebody who asked where to sit is not an answer.
             nodes = [n for n in self.graph.nodes.values() if n.kind == "facility"]
             counts: dict[str, int] = {}
             for node in nodes:
@@ -920,7 +1128,16 @@ class Dialogue:
                 '"where is the nearest AED?", "is the canteen open?".')
             return Reply("\n".join(lines), slots=slots, facility_result=FacilityResult("overview", counts=counts))
 
-        matching = self._service_matches(slots)
+        # Two questions, answered by two different machines. If the words name an amenity
+        # this map publishes, the service search answers precisely (with hours, counts and
+        # distances). If they describe a thing or an activity instead, the places themselves
+        # are searched by meaning. Nothing here has to guess which case it is: the amenity
+        # wording either is in the user's words or it is not.
+        matching: list[Node] = self._service_matches(slots) if raw else []
+        by_meaning = False
+        if not matching and subject:
+            matching = self.places.semantic_places(subject)
+            by_meaning = bool(matching)
         if not matching:
             reply = self._dont_know(
                 raw,
@@ -942,7 +1159,8 @@ class Dialogue:
         cards = [self._card(n, reference) for n in matching[:5]]
         capability = facility_capability(raw)
         label = human_category(capability) if capability != raw else raw
-        head = f"{len(matching)} place(s) for {label}:"
+        head = (f'Closest places for "{raw or slots.subject}":' if by_meaning
+                else f"{len(matching)} place(s) for {label}:")
         lines = [head]
         for card in cards:
             bits = [card["name"]]
@@ -1222,6 +1440,11 @@ class Dialogue:
         ]
         if why:
             lines.append(f"Reason: {why}.")
+        # A refusal should still leave the user somewhere to go: the nearest names the
+        # resolver can find for what they said are the most useful thing to offer.
+        near = self._near_names(subject)
+        if near:
+            lines.append("Closest on the map: " + ", ".join(near) + ".")
         # The capabilities (water, toilets, AEDs) are only part of what this map carries;
         # listing just those made the refusal sound narrower than the bot is. The service
         # labels are the actual vocabulary: clinics, canteens, bookstores, banks …

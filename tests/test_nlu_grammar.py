@@ -30,12 +30,16 @@ CASES = [
     ('is the canteen open now?', 'hours_query', '', '', 'canteen', None),
     ('what time does the bookshop close?', 'hours_query', '', '', 'bookshop', None),
     ('the link between Core C and Core D is closed', 'close', '', '', '', None),
-    ('Core A is closed', 'close', '', 'Core A', '', None),
+    # A closure owns the sentence: the place is resolved from the closure text inside
+    # _close(), so it is not also recorded as a destination.
+    ('Core A is closed', 'close', '', '', '', None),
     ('re-open everything', 'close', '', '', '', None),
     ('reset', 'reset', '', '', '', None),
     ('help', 'help', '', '', '', None),
     ('where is the nearest AED?', 'facility_query', '', '', 'aed', None),
-    ('what facilities are there', 'route', '', 'Campus Facilities and Sustainability Office (CFSO)', '', None),
+    # "what facilities are there" mentions "UMF - Cleanroom Facility". Asking for the list
+    # of amenities beats routing to a cleanroom nobody asked about.
+    ('what facilities are there', 'facility_query', '', '', '', None),
     ('no stairs, from Block V to the library', 'route', 'Block V', 'library', '', True),
     ('從圖書館到賽馬會創新樓點去?', 'route', '圖書館', '賽馬會創新樓', '', None),
     ('由圖書館去飯堂', 'route', '圖書館', '飯堂', '', None),

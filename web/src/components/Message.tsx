@@ -16,28 +16,72 @@ function Readable({ text }: { text: string }) {
   );
 }
 
+interface TraceStep {
+  node?: string;
+  name?: string;
+  g?: number;
+  h?: number | null;
+  f?: number;
+}
+
+/**
+ * The A* run that produced this route, in the order the nodes left the frontier.
+ *
+ * It costs eight short lines and it is the one place in the UI where the search is not a
+ * claim: g is the walking distance so far, h the straight line still to go, f = g + h, and
+ * the list is how far the run had looked by the time it reached the goal. A dropdown
+ * cannot show this because a dropdown has already decided which nodes exist.
+ */
+function Trace({ route }: { route: ChatPayload['route'] }) {
+  const steps = (route?.explain ?? []) as TraceStep[];
+  if (!steps.length) return null;
+  // Dijkstra has no heuristic, and a made-up h would be worse than an absent one.
+  const guided = steps.some((step) => typeof step.h === 'number');
+  return (
+    <div className="mt-1.5 rounded-[8px] border border-line bg-panel-soft px-2 py-1.5">
+      <div className="text-[9.5px] uppercase tracking-[0.09em] text-muted">
+        {guided ? 'A* search order \u00b7 g walked, h straight-line left, f = g + h' : 'search order \u00b7 g walked'}
+      </div>
+      <ol className="mt-1 flex flex-col font-mono text-[10.5px] leading-snug text-muted">
+        {steps.map((step, index) => (
+          <li key={(step.node ?? '') + index} className="truncate" title={step.name}>
+            <span className="text-ink">
+              {index + 1}. {step.name ?? step.node}
+            </span>{' '}
+            g {step.g}
+            {guided ? ' h ' + (step.h ?? 0) + ' f ' + step.f : null}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 function Summary({ payload }: { payload: ChatPayload }) {
   const bits: string[] = [];
   const route = payload.route;
   if (route && route.reachable) {
-    // "leg" in this app means the stretch between two named places (1 or 2 on a campus
-    // walk). The number of graph links is a different quantity, so it says so.
-    bits.push(route.segments.length + (route.segments.length === 1 ? ' segment' : ' segments'));
+    // The friendly number first. The count of graph links is what the search actually
+    // walked, but "26 segments" is a fact about the data structure, not about the walk,
+    // and it was the only thing this line said.
+    bits.push(Math.round(route.metres) + ' m');
     if (route.stats) {
       bits.push(
         route.stats.algorithm.toUpperCase() +
           ' expanded ' +
           route.stats.nodes_expanded +
-          ' nodes, ' +
-          route.stats.ms +
+          ' nodes in ' +
+          route.stats.ms.toFixed(1) +
           ' ms',
       );
     }
   }
   if ((payload.facilities || []).length > 1) bits.push(payload.facilities.length + ' places');
+  // Say what opens. It was a bare "26 segments · ASTAR expanded 253 nodes" with a small
+  // triangle, and both readers who saw it assumed the details were broken.
   return (
     <summary className="summary text-[11.5px] tracking-[0.04em] text-muted hover:text-ink">
-      {bits.length ? bits.join(' · ') : 'details'}
+      {'route breakdown \u00b7 ' + (bits.length ? bits.join(' \u00b7 ') : 'the numbers')}
     </summary>
   );
 }
@@ -180,6 +224,7 @@ export function Message({ message, selection, onFacilityClick, onSelectRoute }: 
             <div className="text-[14.5px] leading-relaxed">{payload.lead}</div>
             <details className="mt-2 border-t border-dashed border-line pt-1.5">
               <Summary payload={payload} />
+              <Trace route={payload.route} />
               <span className="mt-1.5 block">
                 <Readable text={payload.text} />
               </span>

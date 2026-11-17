@@ -399,8 +399,11 @@ html, body {
 .node.facility.cat-amenity-lactation circle        { fill: var(--cat-amenity-lactation); }
 .node.facility.cat-amenity-prayer circle           { fill: var(--cat-amenity-prayer); }
 .node.facility.cat-amenity-other circle            { fill: var(--cat-amenity-other); }
-.route-landmark {
-  fill: var(--ink); font-size: 9.5px; opacity: .82; letter-spacing: .01em;
+/* Two classes deep: as one class it lost the cascade to .node-label (same specificity,
+   declared later), so landmark names were drawn at 11px in a street-name weight. */
+.node-label.route-landmark {
+  fill: var(--ink); font-size: 9px; opacity: .95; letter-spacing: .01em;
+  stroke: var(--map-bg); stroke-width: 2.4;
 }
 .route-landmark-dot { fill: var(--route-1); stroke: var(--route-casing); stroke-width: 1.2; }
 /* Published by PolyU, but no mapped walkway reaches it. */

@@ -18,8 +18,9 @@ That boundary is enforced in code, not requested in a prompt.
 """
 from __future__ import annotations
 
+import difflib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from . import lexical
@@ -44,41 +45,46 @@ INTENTS = (
 
 SYSTEM_PROMPT = """You convert a user's campus-navigation message into JSON slots.
 
-Available places (use the id when you are confident, otherwise null):
-{places}
+You do not know which places or facilities exist on this campus, and you are not asked to
+guess: the app knows its own map and matches what the user said against it. Your job is to
+report the user's words, not to classify or translate them.
 
 Return ONLY a JSON object with exactly these keys:
 {{
   "intent": one of {intents},
-  "origin": place id or null,
-  "destination": place id or null,
-  "via": a place to walk through on the way, or null,
+  "need": the words the user used for the thing they want to find, copied verbatim, or null,
+  "origin": the place the user starts at, in their own words, or null,
+  "destination": the place they want to reach, in their own words, or null,
+  "vias": every place to walk through, in the order the user said them, as a list of
+          their own words (empty or null when there are none),
   "closed": the place or link the user says is closed, as free text, or null,
-  "item": the facility this question needs, from the list below, or null,
   "language": "en" or "zh"
 }}
 
-The facilities this map carries (use these words for "item"):
-{facilities}
-
 Rules:
-- Never invent a place id that is not in the list. If the user names a place that is
-  not listed, put their words there verbatim ("destination": "the 7-Eleven") and keep
-  the intent -- the app resolves names itself, and it knows places this short list
-  leaves out. Never answer null for a place the user actually named: that silently
-  turns their question into "where do you want to go?".
-- "is the canteen open now", "opening hours of the clinic" -> intent "hours_query".
-- "where is the nearest AED / toilet / water station" -> intent "facility_query"
-  with item set to that facility ("aed", "toilet", "water station").
-- A need rather than a facility name still belongs in "item": map it to the closest
-  amenity in the list above. Examples: "art supplies", "a printer", "printing",
-  "photocopy", "paper", "stationery" -> bookstore; "cash", "money", "withdraw" -> bank; "something to eat", "lunch" ->
-  catering outlets; "a doctor", "medicine", "feel unwell" -> clinics; "a room to pray"
-  -> prayer room; "fill my bottle", "drinking water" -> water station; "a bus" ->
-  bus stop. Use the label exactly as written in the list.
-  Never answer a need with a housekeeping label; pick the amenity a person would walk to.
-  If no amenity in the list is a reasonable answer, leave "item" null.
-- "from A, pass by C, then B" -> origin A, via C, destination B.
+- Copy the user's words into the slot: "destination": "the 7-Eleven", "origin": "Block V".
+  Do not translate them, do not shorten them, do not guess an id or a coordinate, and do
+  not replace them with a category of your own -- "a swim" stays "a swim", never "sports
+  facilities". Never answer null for a place the user actually named: that silently turns
+  their question into "where do you want to go?".
+- Those examples show the shape of an answer, not its content. Use only the words this
+  user wrote: if they did not say where they are starting, "origin" is null, and null is
+  the right answer for a place they did not mention.
+- intent "facility_query" is any "find me / where can I / I want ..." question that is not
+  a route and not a timetable. Put the thing they want in "need", copied verbatim ("a
+  swim", "somewhere to eat lunch", "the nearest AED", "to print something"), and leave
+  origin and destination null. Whether that is an amenity, a building or an activity is
+  decided by the app, which can see the whole campus; you cannot see it, so do not decide.
+- intent "hours_query" for opening times: "is the canteen open now", "opening hours of the
+  clinic", "what time does the bookshop close" -> put the place or service in "need".
+- intent "route" for a journey, "distance" for how far, "close" when the user reports
+  something closed, "reset"/"help" for those two commands, "out_of_scope" only when the
+  message is not about this campus at all.
+- Never copy a need or an activity into "destination": a need in a place slot becomes a
+  route to somewhere nobody asked for.
+- Stops are a list and keep their order: "from A through C, then passing Block D, to B" ->
+  origin A, vias ["C", "Block D"], destination B. "I must pass through X, Y and Z" is three
+  stops: vias ["X", "Y", "Z"].
 - Output JSON only, no prose, no code fences."""
 
 
@@ -88,8 +94,16 @@ class Slots:
     origin_text: str = ""
     destination_text: str = ""
     closed_text: str = ""    # the raw words around a closure ("the library is closed")
-    item: str = ""
-    via_text: str = ""     # a place to walk through on the way ("pass by Core P")
+    # The thing the user wants to find, in their own words: "a swim", "the nearest AED".
+    # The model reports it; the engine decides what kind of thing it is (see places.
+    # amenity_in_text). This replaced a slot the model had to fill with a label from a list
+    # of amenities, which is how "I want to have a swim" came back as "water station".
+    need: str = ""
+    item: str = ""           # the amenity this map offers, decided by the engine or grammar
+    # The places to walk through, in the order the user said them: "through Core P, then
+    # Block X" is two. A list rather than one string because that is what the request is --
+    # the walk visits each stop in turn, so the order is part of the answer.
+    vias: list[str] = field(default_factory=list)
     subject: str = ""      # the raw words the question is *about* (hours/facility queries)
     language: str = "en"
     source: str = "grammar"
@@ -112,7 +126,7 @@ _DIRECTORY_LABELS = frozenset({
 })
 
 
-def _facility_words(graph: CampusGraph) -> list[str]:
+def facility_words(graph: CampusGraph) -> list[str]:
     """The amenity labels this map actually carries, for the prompt.
 
     Read from the graph rather than written into the prompt, so a facility the map does
@@ -125,38 +139,29 @@ def _facility_words(graph: CampusGraph) -> list[str]:
     amenities = labels - _DIRECTORY_LABELS
     return sorted(amenities or labels)
 
+def _as_list(value: Any) -> list[str]:
+    """A slot that may be a list, one string, or null, read as a list of strings.
 
-def _place_catalogue(graph: CampusGraph, limit: int = 90) -> str:
-    """The places the model is shown, in the order it is most likely to need them.
-
-    Every building is listed, plus ONE representative of each service type: 192 nodes
-    would blow the prompt budget, and the model does not need the id of one particular
-    water station to understand "where can I fill my bottle".
+    A prompt is not a type system: the model writes "vias": ["Core P", "Block X"] most of the
+    time and "vias": "Core P" the rest, and both mean the same thing.
     """
-    buildings = [
-        n for n in graph.nodes.values()
-        if n.kind not in ("facility", "waypoint") and n.name
-    ]
-    representatives: dict[str, object] = {}
-    for node in graph.nodes.values():
-        if node.kind == "facility" and node.service not in representatives:
-            representatives[node.service] = node
-
-    rows = []
-    for node in buildings[:limit]:
-        extra = f" ({node.name_zh})" if node.name_zh else ""
-        rows.append(f"- {node.id}: {node.name}{extra}")
-    for node in representatives.values():
-        rows.append(f"- {node.id}: {node.name} [one of the '{node.service}' places]")
-    return "\n".join(rows)
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return [item for item in value if isinstance(item, str)]
+    return []
 
 
 def parse_with_llm(text: str, graph: CampusGraph, client: DeepSeekClient) -> Slots | None:
-    prompt = SYSTEM_PROMPT.format(
-        places=_place_catalogue(graph),
-        intents=", ".join(f'"{i}"' for i in INTENTS),
-        facilities=", ".join(_facility_words(graph)),
-    )
+    # No place catalogue: 98 lines and ~1,400 tokens per message that the model does not
+    # need, because the resolver names places from the graph. The short facility list
+    # stays -- that is the vocabulary "item" has to be chosen from.
+    # No map vocabulary at all: not the place catalogue (which let the model invent names)
+    # and not the amenity list (which let it turn "a swim" into "water station"). Both are
+    # things the engine can see and the model cannot, so both are the engine's job.
+    prompt = SYSTEM_PROMPT.format(intents=", ".join(f'"{i}"' for i in INTENTS))
     result = client.chat(
         [
             {"role": "system", "content": prompt},
@@ -202,8 +207,12 @@ def parse_with_llm(text: str, graph: CampusGraph, client: DeepSeekClient) -> Slo
         origin_text=as_id(payload.get("origin")),
         destination_text=as_id(payload.get("destination")),
         closed_text=closed_text,
-        item=str(payload.get("item") or "").strip().lower(),
-        via_text=as_id(payload.get("via")),
+        # "need" is copied, "item" is not: any label the model volunteers is ignored, because
+        # choosing from a vocabulary it cannot see is the model's one job it cannot do.
+        need=str(payload.get("need") or "").strip(),
+        vias=[phrase for phrase in (as_id(value) for value in
+                                    _as_list(payload.get("vias", payload.get("via"))))
+              if phrase],
         subject=text.strip() if intent in ("hours_query", "facility_query") else "",
         language=str(payload.get("language") or "en"),
         source="llm",
@@ -261,12 +270,46 @@ REOPEN = re.compile(
     r"clear the closures?|remove the closures?)\b",
     re.I,
 )
-_CLOSE = re.compile(
-    r"\b(close[ds]?|closing|shut|blocked|out of service|under maintenance|"
-    r"no longer (?:open|available))\b",
-    re.I,
+# Closure words, in both scripts, in one place. The grammar reads closures with this and
+# the model guard checks it too: two lists that must agree is a bug waiting to happen (they
+# have already disagreed once in this project's history, over filler words). The Chinese
+# half matters because the grammar's English rules cannot see "圖書館今日關閉", which the
+# model had to be allowed to read.
+_CLOSED_SAID = re.compile(
+    r"\b(?:close[ds]?|closing|shut|blocked|out of service|under maintenance|"
+    r"no longer (?:open|available))\b|"
+    r"關閉|关闭|關門|关门|裝修|装修|維修|维修|唔開|不开|停開|停开|"
+    r"暫停開放|暂停开放|閉館|闭馆|封閉|封闭|停用"
 )
 _FROM_TO = re.compile(r"\bfrom\s+(?P<o>.+?)\s+\bto\s+(?P<d>.+?)(?:[?.!,]|$)", re.I)
+# A stop bolted onto the end of a request: "from A to B but stop at C", "route me to A via
+# B". Only a *trailing* clause, and only behind an explicit marker -- cutting clauses out of
+# the middle of a sentence moved endpoints around, which is why the grammar keeps a
+# two-slot contract. Without this, "core a but stop at core p" arrived as one destination.
+# The same stop said first: "pass by Core P on the way from A to B". The trailing marker
+# after the name ("on the way", "first", "then") is what makes the cut safe -- it is an
+# explicit signal that the clause has ended, which is exactly what was missing when cutting
+# clauses out of the middle of sentences moved endpoints around.
+_VIA_PREFIX = re.compile(
+    r"^(?:(?:could you|can you|please|i want to|i'd like to)\s+)?"
+    r"(?:via|through|by\s+way\s+of|"
+    r"pass(?:ing)?\s+(?:by|through)|"
+    r"stop(?:ping)?\s+(?:at|by|off\s+at|in)|"
+    r"go(?:ing)?\s+(?:through|via|past))\s+"
+    r"(?P<via>[^,.;?!]+?)\s+(?:(?:on|along)\s+the\s+way|first|then)\b",
+    re.I,
+)
+_VIA_CLAUSE = re.compile(
+    r"[,\s]+(?:(?:but|and|then|also|please)\s+)?"
+    r"(?:via|through|by\s+way\s+of|"
+    r"pass(?:ing)?\s+(?:by|through)|"
+    r"stop(?:ping)?\s+(?:at|by|off\s+at|in)|"
+    r"go(?:ing)?\s+(?:through|via|past))\s+"
+    # the idiom after the name is not part of the name: "through Core P on the way"
+    r"(?P<via>[^,.;?!]+?)\s*(?:(?:on|along)\s+the\s+way|if\s+possible|please)?"
+    r"\s*[.?!]*$",
+    re.I,
+)
 # "How do I get to D from O?" and "How far is D from O?" put D first.
 _AT_AND_GO = re.compile(
     r"\bi(?: am|['’]m)\s+(?:currently\s+|now\s+)?at\s+(?P<o>.+?)"
@@ -309,16 +352,22 @@ _ZH_TO = re.compile(r"^(?:[请請](?:問|问)?\s*)?(?:我(?:想|要)|帶我|带�
                     r"(?:前往|去|到)\s*(?P<d>.+)")
 _ZH_ENDING = re.compile(r"[,，\s]*(?:[点點](?:樣|样)?(?:行|走|去)|怎[么麼样樣](?:走|去)|"
                         r"怎樣走|如何(?:走|去)|該怎麼走|该怎么走)[呢啊呀嗎吗]?$")
-# "to X" needs an actual "to": a bare "^" alternative swallows whole sentences.
+# "to X" needs a *request* in front of it, not just the preposition. A bare "\bto\s+" matched
+# every "to" in the language, so "I want to make sure I pass through Core P on the way" gave
+# the destination "make sure I pass through Core P on the way" -- the fragment resolved, so
+# every check downstream believed it. The marker is what makes a request: a leading "to", or
+# a travel verb immediately before it.
 _TO_ONLY = re.compile(
-    r"(?:\bto\s+|\b(?:get|go|walk|head|take\s+me)\s+to\s+)"
+    r"(?:^to\s+|\b(?:get|go|walk|head|navigate|route|take)\s+(?:me\s+)?to\s+|"
+    r"\bdirections\s+to\s+)"
     r"(?P<d>[a-z0-9][\w &'\-/().]*?)(?:[?.!,]|$)",
     re.I,
 )
 # If a travel verb or leading "to" is explicit, preserve an unknown
 # destination as written so the dialogue can ask for its name.
 _DEST_REQUEST = re.compile(
-    r"^to\s+|\b(?:get|go|walk|head|navigate|directions|take me)\s+to\s+", re.I,
+    r"^to\s+|\b(?:get|go|walk|head|navigate|route|take)\s+(?:me\s+)?to\s+|"
+    r"\bdirections\s+to\s+", re.I,
 )
 _ZH_DISTANCE_END = re.compile(r"(?:大[概約约])?(?:有|要)?(?:多[遠远]|[幾几][遠远]|多少米|[幾几]多米)[呢啊呀嗎吗]?$")
 _HOW_FAR = re.compile(r"\bhow\s+far\b|\bdistance\b|多[遠远]|[幾几][遠远]|多少米|[幾几]多米", re.I)
@@ -416,6 +465,16 @@ _FACILITY_ALL = re.compile(
     r"\b(facilit(?:y|ies)|amenities|what places|what can i find|what is here|"
     r"what's here|what is available|what services)\b", re.I)
 
+def asks_for_everything(text: str) -> bool:
+    """Is this a request for the catalogue rather than for one place?
+
+    "What facilities are there?" and "where can I sit outside and study?" both arrive with
+    no amenity item and no place name. The first wants the list; the second wants a place
+    found by meaning. The words are the only thing that separates them.
+    """
+    return bool(_FACILITY_ALL.search(text or ""))
+
+
 def _clean_place(text: str) -> str:
     """Drop the verb and the filler, but never the letter in a building name.
 
@@ -436,6 +495,23 @@ def refers_to_last_distance(text: str) -> bool:
     """An elliptical follow-up explicitly asks about the current trip."""
     route_text, _ = stair_request(text)
     return bool(_DISTANCE_FOLLOWUP.fullmatch(route_text.rstrip("？！。?!. ")))
+
+
+# Words that continue a thought rather than start a request. "but I want to make sure I
+# pass through Core P on the way" opened with "but", so the bare "A to B" rule read it as
+# origin "want", destination "Core P" -- a sentence about a stop became a new journey.
+_CONTINUATION = frozenset({
+    "but", "and", "so", "also", "then", "actually", "oh", "well", "because", "if", "when",
+    "since", "plus", "though", "however", "instead",
+})
+
+
+def reads_as_a_clause(text: str) -> bool:
+    """Too long, or continuing a thought, to be a bare pair of place names."""
+    words = re.findall(r"[a-z']+", (text or "").lower())
+    if len(words) > 6:
+        return True
+    return bool(words) and words[0] in _CONTINUATION
 
 
 def opens_with_a_request(text: str) -> bool:
@@ -468,8 +544,18 @@ def _route_pair(text: str, places: PlaceResolver) -> re.Match | None:
             # accept this shorthand if both sides name a place in the index.
             if all(places.resolve(name) for name in short.group("o", "d")):
                 pair = short
-    if pair is None and not opens_with_a_request(text):
-        pair = _PLACE_TO_PLACE.match(text)
+    if pair is None and not opens_with_a_request(text) and not reads_as_a_clause(text):
+        bare = _PLACE_TO_PLACE.match(text)
+        # A bare "A to B" is only a pair if it names two places. "but I want to make sure I
+        # pass through Core P on the way" splits at its "to" into "but I want" and "make
+        # sure I pass through Core P on the way" -- the shape was the coincidence of a
+        # preposition, not a route, and the left side names nothing. The rule that decides
+        # is evidence, exactly as it is everywhere else in this module: both sides have to
+        # resolve. reads_as_a_clause() above is only the cheap pre-filter that keeps a
+        # long sentence from costing two resolver round-trips; this is the authority, and
+        # it is the same test the Chinese shorthand below already applied.
+        if bare and all(places.resolve(side) for side in bare.group("o", "d")):
+            pair = bare
     return pair
 
 
@@ -533,6 +619,24 @@ def _chinese_facility(text: str, places: PlaceResolver) -> Slots | None:
 def parse_with_grammar(text: str, places: PlaceResolver) -> Slots:
     lowered, avoid_stairs = stair_request(text)
 
+    # A stop at the end of the sentence is a stop, not part of the destination. The phrase
+    # has to name a place -- the same evidence rule as everywhere else -- so a stray
+    # "through the tunnel" is left in the sentence rather than turned into a waypoint.
+    vias: list[str] = []
+    trailing_via = _VIA_CLAUSE.search(lowered)
+    if trailing_via:
+        candidate = _clean_endpoint(trailing_via.group("via"))
+        if candidate and places.resolve(candidate):
+            vias = [candidate]
+            lowered = lowered[:trailing_via.start()].strip(" ,.;:")
+    if not vias:
+        leading_via = _VIA_PREFIX.match(lowered)
+        if leading_via:
+            candidate = _clean_endpoint(leading_via.group("via"))
+            if candidate and places.resolve(candidate):
+                vias = [candidate]
+                lowered = lowered[leading_via.end():].strip(" ,.;:")
+
     facility = _chinese_facility(lowered, places)
     if facility:
         facility.avoid_stairs = avoid_stairs
@@ -574,13 +678,18 @@ def parse_with_grammar(text: str, places: PlaceResolver) -> Slots:
         if subject:
             destination_text = _clean_endpoint(subject.group("d"))
 
-    # A place mentioned without "to/from" (e.g. "the library?") still counts.
+    # A place mentioned without "to/from" ("the library?") still counts -- but held here,
+    # not assigned, because a sentence that mentions a place is not always *about* that
+    # place. "What facilities are there?" mentions "UMF - Cleanroom Facility", and
+    # answering a request for the list of amenities with a route to a cleanroom is the
+    # wrong kind of right. The more specific rules below get first refusal.
+    mentioned = ""
     if not destination_text:
         hits = places.resolve(lowered)
         if len(hits) == 1:
-            destination_text = hits[0].name
+            mentioned = hits[0].name
 
-    closed_text = lowered.strip() if _CLOSE.search(lowered) else ""
+    closed_text = lowered.strip() if _CLOSED_SAID.search(lowered) else ""
 
     facility_hit = _FACILITY.search(lowered)
     item = facility_hit.group(1).lower() if facility_hit else ""
@@ -610,9 +719,12 @@ def parse_with_grammar(text: str, places: PlaceResolver) -> Slots:
         intent = "facility_query"
     elif _FACILITY_ALL.search(lowered) and not (origin_text or destination_text):
         intent = "facility_query"   # no subject -> the overview reply lists what exists
+    elif mentioned and not (origin_text or destination_text):
+        destination_text = mentioned        # a bare place name is the thing asked about
+        intent = "route"
     elif _HOW_FAR.search(lowered):
         intent = "distance"
-    elif origin_text or destination_text or avoid_stairs is not None:
+    elif origin_text or destination_text or vias or avoid_stairs is not None:
         intent = "route"
     else:
         intent = "out_of_scope"
@@ -625,6 +737,7 @@ def parse_with_grammar(text: str, places: PlaceResolver) -> Slots:
         intent=intent,
         origin_text=origin_text,
         destination_text=destination_text,
+        vias=vias,
         closed_text=closed_text,
         item=item,
         subject=subject,
@@ -634,31 +747,94 @@ def parse_with_grammar(text: str, places: PlaceResolver) -> Slots:
     )
 
 
-def _validated(slots: Slots, places: PlaceResolver) -> Slots | None:
+def _named_by_user(phrase: str, text: str) -> bool:
+    """Can the user's own message account for this place phrase?
+
+    A prompt shows the *shape* of an answer with a real example ("origin": "Block V"), and
+    a model that is unsure hands the example back. Observed: "where is the library?"
+    answered as a route from Block V, because "Block V" is in the prompt and the library is
+    not. The slot resolved to a real place, so every check downstream believed it.
+
+    So a name has to be traceable to the words the user wrote: a word in common, or a word
+    close enough to be the same word misspelt ("libarry" -> "library"). The tolerance is
+    for spelling, never for substitution -- "Block V" shares nothing with "how do I get to
+    the library?". Chinese carries its own test, because it is written without spaces.
+    """
+    said = lexical.normalise(text)
+    for word in lexical.normalise(phrase):
+        if word in said:
+            return True
+        if _HAS_CJK.search(word) and word in text:
+            return True
+        if len(word) >= 4 and any(
+            len(other) >= 4 and difflib.SequenceMatcher(None, word, other).ratio() >= 0.8
+            for other in said
+        ):
+            return True
+    return False
+
+
+def _validated(slots: Slots, places: PlaceResolver, text: str = "") -> Slots | None:
     """Accept a model parse only if the map can back it up.
 
-    Two cheap checks. The intent must be one this dialogue layer implements
-    (parse_with_llm already filters that, so this is belt and braces). And every place
-    phrase the model reports must be one the resolver recognises: the model may report
-    what the user said, it may never create a place. An endpoint that resolves to
-    nothing is dropped, and a route left with no endpoint is refused outright so the
-    grammar gets its turn instead.
+    Three cheap checks. The intent must be one this dialogue layer implements
+    (parse_with_llm already filters that, so this is belt and braces). Every place phrase
+    the model reports must be one the resolver recognises: the model may report what the
+    user said, it may never create a place. And every phrase must be traceable to the
+    user's own words (see _named_by_user), because resolving is not the same as being
+    asked about -- the prompt's own example resolves. An endpoint that fails either test
+    is dropped, and a route left with no endpoint is refused outright so the grammar gets
+    its turn instead.
     """
     if slots.intent not in INTENTS:
         return None
-    # A stop is optional: an unnameable one is dropped so the plain route still runs.
-    if slots.via_text and not places.resolve(slots.via_text):
-        slots.via_text = ""
+    # A model may decline to understand something; it may not decide that a campus
+    # question is out of scope, and it may not decide that a question is about the
+    # conversation rather than the campus. Observed: "re-open it" -- one of this app's own
+    # commands, recognised by the grammar's REOPEN rule -- came back as out_of_scope and the
+    # recovery path never ran; "what can I find here" came back as "help" and the catalogue
+    # listing never ran. These two intents are meta: the grammar holds fixed, inspectable
+    # rules for both, so the grammar is what gets to say them.
+    if slots.intent in ("out_of_scope", "help"):
+        return None
+    # The model read the intent but not the place ("the canteen is closed" -> close, no
+    # closed text). The grammar hands _close the whole sentence and lets the resolver find
+    # the place inside it, so do the same instead of asking the user to repeat themselves.
+    if slots.intent == "close" and not slots.closed_text and _CLOSED_SAID.search(text):
+        slots.closed_text = text.strip()
+    # A closure blocks every route through that place, so it is the most expensive thing a
+    # model can make up. Keeping one takes two things: the user has to have said something
+    # is closed (naming a place is not saying it is closed -- "how do I get from Block V to
+    # the library?" names both ends and reports nothing closed), and the place has to be
+    # one of the places they named.
+    if slots.closed_text and not (
+        _CLOSED_SAID.search(text) and _named_by_user(slots.closed_text, text)
+    ):
+        slots.closed_text = ""
+    # A stop is optional: an unnameable or unmentioned one is dropped so the plain route
+    # still runs. Each one is checked on its own, so a request with three stops keeps the
+    # two that name places.
+    slots.vias = [phrase for phrase in (slots.vias or [])
+                  if _named_by_user(phrase, text) and places.resolve(phrase)]
     for name in ("origin_text", "destination_text"):
         phrase = getattr(slots, name)
         if not phrase:
             continue
-        if places.resolve(phrase):
-            continue
-        setattr(slots, name, "")            # an unnameable endpoint is not evidence
-        if slots.intent in ("route", "distance"):
-            return None
-    if slots.intent == "route" and not (slots.origin_text or slots.destination_text):
+        if not _named_by_user(phrase, text):
+            setattr(slots, name, "")    # the model's own idea, not the user's words
+            if slots.intent in ("route", "distance"):
+                return None
+        # A phrase the user did say that the map cannot find is *kept*: the dialogue then
+        # answers it with "I do not know X" and the closest names, instead of quietly
+        # turning their sentence into a different question about a place they never named.
+        # Dropping it is how "Core Y" became a question about Core A.
+    # A route needs somewhere to go -- unless it only adds a stop, which re-plans the
+    # journey already in progress ("make sure I pass through Core P on the way"). The
+    # dialogue holds those endpoints; refusing here sent the sentence back to the grammar,
+    # which read it as a fresh pair of places.
+    if slots.intent == "route" and not (
+        slots.origin_text or slots.destination_text or slots.vias
+    ):
         return None
     return slots
 
@@ -677,7 +853,7 @@ def parse(text: str, graph: CampusGraph, client: DeepSeekClient | None,
         route_text, avoid_stairs = stair_request(text)
         candidate = parse_with_llm(route_text or text, graph, client)
         if candidate is not None:
-            accepted = _validated(candidate, places)
+            accepted = _validated(candidate, places, route_text or text)
             if accepted is not None:
                 accepted.avoid_stairs = (
                     avoid_stairs if avoid_stairs is not None else accepted.avoid_stairs

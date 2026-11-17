@@ -11,9 +11,9 @@ type Field = ParsedPlace & { edit?: { id: string | null; query: string } };
 type Fields = Record<Role, Field>;
 
 const wording = {
-  'en-US': { origin: 'From', destination: 'To', search: 'Search places', clear: 'Clear', none: 'No matching place', choose: 'Choose a place from the list.', failed: 'Place preview unavailable. Review the text before sending.' },
-  'zh-CN': { origin: '起点', destination: '终点', search: '搜索地点', clear: '清除', none: '找不到匹配地点', choose: '请从列表中选择地点。', failed: '暂时无法预览地点，请在发送前核对文字。' },
-  'zh-HK': { origin: '起點', destination: '終點', search: '搜尋地點', clear: '清除', none: '找不到相符地點', choose: '請從列表中選擇地點。', failed: '暫時無法預覽地點，請在傳送前核對文字。' },
+  'en-US': { origin: 'From', destination: 'To', search: 'Search places', clear: 'Clear', none: 'No matching place', choose: 'Choose a place from the list.', failed: 'Place preview unavailable. Review the text before sending.', heard: 'Heard:', change: 'change' },
+  'zh-CN': { origin: '起点', destination: '终点', search: '搜索地点', clear: '清除', none: '找不到匹配地点', choose: '请从列表中选择地点。', failed: '暂时无法预览地点，请在发送前核对文字。', heard: '听到：', change: '修改' },
+  'zh-HK': { origin: '起點', destination: '終點', search: '搜尋地點', clear: '清除', none: '找不到相符地點', choose: '請從列表中選擇地點。', failed: '暫時無法預覽地點，請在傳送前核對文字。', heard: '聽到：', change: '修改' },
 };
 
 function copyFor(lang: string) {
@@ -133,6 +133,7 @@ interface Result {
 /** Preview a dictated question without advancing the dialogue. Only Send commits the choices. */
 export function useRouteDraft(text: string, lang: string, graph: Graph | null, enabled: boolean) {
   const [result, setResult] = useState<Result>();
+  const [openFields, setOpenFields] = useState(false);
   const places = useMemo(() => (graph?.nodes || []).filter(n => n.kind !== 'waypoint' && n.name), [graph]);
   const nodes = useMemo(() => new Map(places.map(n => [n.id, n])), [places]);
   const wanted = enabled && Boolean(text.trim());
@@ -184,17 +185,32 @@ export function useRouteDraft(text: string, lang: string, graph: Graph | null, e
   const blocked = roles.some(invalid);
   const labels = roles.map(role => display(fields[role], nodes, lang));
   const endpoints = { origin: choiceId(fields.origin) || undefined, destination: choiceId(fields.destination) || undefined };
-  const confirmation = roles.some(role => fields[role].edit) && labels.every(Boolean) ? labels.join(' → ') : undefined;
+  // What the app heard is worth one quiet line -- speech recognition mishears building
+  // codes ("Block Y" and "Core Y" are one syllable apart) and this is the only place the
+  // correction can be made. The two input fields with their suggestion lists are behind
+  // "change": they used to open on *every* dictation, which read as the app handing a
+  // voice command back for manual processing.
+  const edited = roles.some(role => fields[role].edit);
+  const confirmation = edited && labels.every(Boolean) ? labels.join(' \u2192 ') : undefined;
+  const showFields = edited || blocked || openFields;
   return {
     blocked, endpoints: endpoints.origin || endpoints.destination ? endpoints : undefined, confirmation,
     editor: <div className="px-4 pt-2">
-      <div className="grid grid-cols-2 gap-2">
-        {roles.map((role, index) => <EndpointInput key={role} role={role} lang={lang} value={labels[index]}
-          invalid={invalid(role)} places={places}
-          onEdit={edit => setResult(prev => prev?.fields && prev === current ? {
-            ...prev, fields: { ...prev.fields, [role]: { ...prev.fields[role], edit } },
-          } : prev)} />)}
-      </div>
+      {showFields ? (
+        <div className="grid grid-cols-2 gap-2">
+          {roles.map((role, index) => <EndpointInput key={role} role={role} lang={lang} value={labels[index]}
+            invalid={invalid(role)} places={places}
+            onEdit={edit => setResult(prev => prev?.fields && prev === current ? {
+              ...prev, fields: { ...prev.fields, [role]: { ...prev.fields[role], edit } },
+            } : prev)} />)}
+        </div>
+      ) : (
+        <div className="flex items-baseline gap-2 text-[11.5px] text-muted">
+          <span className="min-w-0 truncate">{copyFor(lang).heard + ' ' + labels.join(' \u2192 ')}</span>
+          <button type="button" onClick={() => setOpenFields(true)}
+            className="flex-none underline decoration-dotted hover:text-brand">{copyFor(lang).change}</button>
+        </div>
+      )}
       {blocked && <p role="status" className="mt-1 text-xs text-muted">{copyFor(lang).choose}</p>}
     </div>,
   };

@@ -46,7 +46,8 @@ Hard rules:
 - Use only the place names that appear in the JSON.
 - If "reachable" is false, say clearly that no route exists and mention the single most
   relevant restriction, then stop. Do not promise a route.
-- If extra_minutes_are_not_known or similar fields are absent, do not talk about time.
+- "walk_minutes", when present, is how long the walk takes at an easy pace; you may say it.
+- If a field is absent, do not talk about it.
 - No lists, no headings, no markdown. Just the sentence(s).
 """
 
@@ -64,6 +65,7 @@ class Facts:
     segment_metres: list[float] = field(default_factory=list)
     constraints: list[str] = field(default_factory=list)
     previous_metres: float | None = None
+    walk_minutes: int | None = None       # at an easy pace, computed from total_metres
     blocking: list[str] = field(default_factory=list)
     options: list[str] = field(default_factory=list)
     option_metres: list[float] = field(default_factory=list)
@@ -79,6 +81,8 @@ class Facts:
         if self.reachable and self.total_metres is not None:
             payload["total_metres"] = round(self.total_metres)
             payload["legs"] = len(self.segment_lines)
+            if self.walk_minutes is not None:
+                payload["walk_minutes"] = self.walk_minutes
             payload["legs_detail"] = self.segment_lines
             if self.previous_metres is not None:
                 payload["previous_route_metres"] = round(self.previous_metres)
@@ -103,6 +107,7 @@ class Facts:
                 return
         add(self.total_metres)
         add(self.previous_metres)
+        add(self.walk_minutes)
         if self.total_metres is not None and self.previous_metres is not None:
             add(abs(self.total_metres - self.previous_metres))
         for metres in self.segment_metres:
