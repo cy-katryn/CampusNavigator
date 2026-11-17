@@ -15,14 +15,15 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from .config import RAW_DIR
+from .config import RAW_DIR, get_settings
 from .facility_speech import FacilityResult, requested_day
-from .graph import STOPWORDS, CampusGraph, Node
+from .graph import CampusGraph, Node
 from .kb import KnowledgeBase, hours_summary, open_state, parse_slots, today_hours
 from .llm import DeepSeekClient
 from .narrate import Facts, Narration, Narrator
-from .nlu import (REOPEN, Slots, map_spelling, names_destination, parse, parse_with_grammar,
+from .nlu import (REOPEN, Slots, names_destination, parse, parse_with_grammar,
                   refers_to_last_distance, stair_request)
+from .place_index import PlaceIndex
 from .places import (
     SERVICE_WORDS,
     canonical_category,
@@ -156,15 +157,23 @@ _STEP_FREE = re.compile(
 class Dialogue:
     def __init__(self, graph: CampusGraph, client: DeepSeekClient | None = None,
                  narrator: Narrator | None = None,
-                 knowledge: KnowledgeBase | None = None) -> None:
+                 knowledge: KnowledgeBase | None = None,
+                 places: PlaceIndex | None = None) -> None:
         self.graph = graph
         self.client = client
         self.narrator = narrator
         self.state = SessionState()
-        self._scores: dict[str, int] = {}   # last resolve() scores, for tie-breaking
+        self._places = places
         # Built lazily: 876 documents cost about a tenth of a second, which is too
         # much to spend on a /help or /quit, and nothing for a real question.
         self._knowledge = knowledge
+
+    @property
+    def places(self) -> PlaceIndex:
+        """The place-name index: embeddings in, Pinecone out. No keyword fallback."""
+        if self._places is None:
+            self._places = PlaceIndex(self.graph, get_settings())
+        return self._places
 
     @property
     def knowledge(self) -> KnowledgeBase | None:
@@ -182,7 +191,7 @@ class Dialogue:
         """A bare place name answers the last question about a missing endpoint."""
         if (self.state.pending and text and slots.intent in ("route", "out_of_scope")
                 and (slots.avoid_stairs is None or slots.mentions_places or self._preferred_matches(text))
-                and not slots.origin_text and not names_destination(text, self.graph)):
+                and not slots.origin_text and not names_destination(text, self.places)):
             if not text.rstrip().endswith(("?", "？")) or self._preferred_matches(text):
                 if self.state.pending == "origin":
                     slots.origin_text, slots.destination_text = text, ""
@@ -192,7 +201,7 @@ class Dialogue:
 
     def draft_slots(self, text: str) -> Slots:
         """Preview a voice draft without running a search or changing the dialogue."""
-        slots = parse_with_grammar(text, self.graph)
+        slots = parse_with_grammar(text, self.places)
         if slots.intent == "route" and slots.facility_choice is not None:
             last = self.state.last_facilities
             index = slots.facility_choice
@@ -222,7 +231,7 @@ class Dialogue:
 
     def handle(self, text: str, *, endpoints: dict | None = None) -> Reply:
         if endpoints is None:
-            slots = parse(text, self.graph, self.client)
+            slots = parse(text, self.graph, self.client, self.places)
             self._interpret_pending_place(stair_request(text)[0], slots)
         else:
             # The selections replace only the place slots. Keep the original
@@ -309,53 +318,12 @@ class Dialogue:
         )
 
     def _preferred_matches(self, text: str) -> list[Node]:
-        """Resolve a place name, preferring buildings over the bins inside them.
+        """The places a phrase names, best first, from the embedding index.
 
-        "library" matches both Pao Yue-kong Library and the four facilities in it;
-        "battery bin" should pick the facility. SERVICE_WORDS decides which.
+        An empty list is a real answer: the phrase names nothing on this map, and the
+        dialogue asks a clarifying question instead of guessing.
         """
-        if text in self.graph.nodes and self.graph.node(text).kind != "waypoint":
-            return [self.graph.node(text)]
-        text = map_spelling(text)
-        scored = self.graph.resolve_scored(text)
-        if not scored:
-            return []
-        scores = {node.id: score for score, node in scored}
-        matches = [node for _, node in scored]
-        needle = " ".join((text or "").lower().split())
-        exact = [n for n in matches if n.name.lower() == needle]
-        if exact:
-            return exact
-        # When the user names the building, offer it once rather than listing
-        # every door and facility whose label also contains its name.
-        ids = {n.id for n in matches}
-        grouped = [n for n in matches if not (n.parent and n.parent in ids)]
-        if grouped:
-            matches = grouped
-        # "Block L" is a prefix of "Block L (Pao Yue-Kong Library)" but only of that
-        # one -- "Block M" and "Block N" share the word "block", not the phrase.
-        prefix = [
-            n for n in matches
-            if re.match(rf"^{re.escape(needle)}(?![a-z0-9])", n.name.lower())
-        ]
-        if prefix:
-            return prefix
-        wants_service = any(w in text.lower() for w in SERVICE_WORDS)
-        if wants_service:
-            matches = [n for n in matches if n.kind == "facility"] or matches
-        else:
-            matches = [n for n in matches if n.kind != "facility"] or matches
-        # Keep only the best-scoring band. A weaker match is not an alternative to the
-        # phrase, it is a worse answer: "library" must not also offer "Block M (Li Ka
-        # Shing Tower)" merely because a word landed in its brackets.
-        top = max(scores[n.id] for n in matches)
-        matches = [n for n in matches if scores[n.id] == top]
-        # A plain name beats a qualified one at the same score: "Pao Yue-Kong Library"
-        # over "Pao Yue-kong Library (LIB)".
-        if top < 60 and len(set(re.findall(r"\w+", needle)) - STOPWORDS) > 1:
-            return matches
-        plain = [n for n in matches if "(" not in n.name]
-        return plain or matches
+        return self.places.resolve(text)
 
     def _close(self, closed_text: str) -> str:
         """Close something the user says is closed: a named link, or a whole place.
@@ -425,11 +393,8 @@ class Dialogue:
                 setattr(self.state, role, matches[0].id)
             else:
                 setattr(self.state, role, None)
-                # Put the closest names in the short spoken list. "Jockey of
-                # Innovation" should include the tower before unrelated Jockey venues.
-                words = set(re.findall(r"\w+", text.casefold())) - STOPWORDS
-                matches.sort(key=lambda n: len(words.intersection(re.findall(r"\w+", n.name.casefold()))),
-                             reverse=True)
+                # The index already ordered them by similarity, so the short spoken
+                # list is simply the best few.
                 names = tuple(dict.fromkeys(node.name for node in matches))
                 unresolved.append((role, text, names[:4]))
         if unresolved:

@@ -36,6 +36,7 @@ import argparse
 import json
 import mimetypes
 import os
+import sys
 import threading
 import webbrowser
 from dataclasses import replace
@@ -53,12 +54,15 @@ from .config import (
     shapes_path,
 )
 from .dialogue import Dialogue, RouteClarification
+from .embeddings import EmbeddingError
 from .facility_speech import facility_details, facility_summary, local_hours
 from .graph import CampusGraph
 from .kb import KnowledgeBase
 from .llm import DeepSeekClient
 from .local_names import building_name, floor_name, localize_label, place_name
 from .narrate import Narrator
+from .pinecone import PineconeError
+from .place_index import PlaceIndex, PlaceIndexError
 from .places import feature_height, shape_kind
 from .speech import MAX_WAV_BYTES, LocalTranscriber, SpeechError
 
@@ -437,7 +441,10 @@ class App:
         self.footprints = load_shapes(shapes_path())
         client = DeepSeekClient(self.settings) if self.settings.llm_available else None
         narrator = Narrator(client) if self.settings.narration_available else None
-        self.dialogue = Dialogue(self.graph, client, narrator, knowledge=self.knowledge)
+        self.places = PlaceIndex(self.graph, self.settings)
+        self.index_info = self.places.check()
+        self.dialogue = Dialogue(self.graph, client, narrator, knowledge=self.knowledge,
+                                 places=self.places)
 
     def apply_settings(self, api_key: str | None = None, model: str | None = None) -> dict:
         """Persist new model settings and use them immediately, without a restart."""
@@ -472,6 +479,7 @@ class App:
             "nodes": len(self.graph.nodes),
             "edges": len(self.graph.edges),
             "knowledge": self.knowledge.coverage(),
+            "places": {"index": self.index_info["index"], "vectors": self.index_info["vectors"]},
             "footprints": len(self.footprints),
             "map_meta": {
                 k: self.graph.meta.get(k)
@@ -576,8 +584,11 @@ class Handler(BaseHTTPRequestHandler):
             if lang not in ("zh-CN", "zh-HK", "en-US"):
                 lang = "en-US"
             if path == "/api/route-draft":
-                with LOCK:
-                    draft = self.app.dialogue.draft_endpoints(text)
+                try:
+                    with LOCK:
+                        draft = self.app.dialogue.draft_endpoints(text)
+                except (PlaceIndexError, EmbeddingError, PineconeError) as exc:
+                    return self._json({"error": f"place index unavailable: {exc}"}, 502)
                 if draft is None:
                     return self._json({"is_route": False})
                 for item in draft.values():
@@ -588,6 +599,10 @@ class Handler(BaseHTTPRequestHandler):
                     reply = self.app.dialogue.handle(text, endpoints=payload.get("endpoints"))
             except ValueError as exc:
                 return self._json({"error": str(exc)}, 400)
+            except (PlaceIndexError, EmbeddingError, PineconeError) as exc:
+                # Place names come from a remote index; a failure there is a visible
+                # 502, never a silently guessed place.
+                return self._json({"error": f"place index unavailable: {exc}"}, 502)
             return self._json(chat_payload(self.app.graph, reply, lang))
         if path == "/api/settings":
             payload = self._read_json()
@@ -645,7 +660,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve(port: int = 8000, host: str = "127.0.0.1", open_browser: bool = False) -> int:
-    app = App()
+    try:
+        app = App()
+    except (PlaceIndexError, EmbeddingError, PineconeError) as exc:
+        print(f"place index unavailable: {exc}", file=sys.stderr)
+        return 2
     Handler.app = app
     httpd = ThreadingHTTPServer((host, port), Handler)
     url = f"http://{host}:{port}/"
@@ -654,6 +673,7 @@ def serve(port: int = 8000, host: str = "127.0.0.1", open_browser: bool = False)
     print(f"  map    : {app.graph.summary()}")
     print(f"  graph  : {rel(GRAPH_FILE)}")
     print(f"  parser : {app.settings.mode_label}")
+    print(f"  places : {app.index_info['index']} ({app.index_info['vectors']} vectors)")
     print(f"  facts  : {app.knowledge.coverage()}")
     print(f"  open   : {url}")
     print("  ctrl-c to stop")

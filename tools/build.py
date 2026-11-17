@@ -741,6 +741,63 @@ def cmd_graph(args) -> int:
     return 0
 
 
+def cmd_embed(args) -> int:
+    """Embed every place name and load it into the Pinecone index the app reads."""
+    from campus_nav.config import get_settings
+    from campus_nav.embeddings import EmbeddingClient, EmbeddingError
+    from campus_nav.pinecone import PineconeError, PineconeStore
+    from campus_nav.place_index import document_text, indexable_nodes
+
+    settings = get_settings()
+    if not settings.vectors_available:
+        print("the place index needs EMBEDDINGS_API_KEY (or GITHUB_TOKEN) and "
+              "PINECONE_API_KEY in .env", file=sys.stderr)
+        return 2
+
+    graph = CampusGraph.load(GRAPH_FILE)
+    nodes = indexable_nodes(graph)
+    if not nodes:
+        print("the graph has no named places to embed", file=sys.stderr)
+        return 2
+
+    embedder = EmbeddingClient(settings)
+    store = PineconeStore(settings)
+    try:
+        print(f"embedding {len(nodes)} place names with {settings.embeddings_model}")
+        vectors: list[list[float]] = []
+        for start in range(0, len(nodes), 32):
+            chunk = nodes[start : start + 32]
+            vectors.extend(embedder.embed([document_text(node) for node in chunk]))
+            print(f"  {min(start + 32, len(nodes))}/{len(nodes)}")
+
+        dimension = len(vectors[0])
+        print(f"dimension {dimension}; ensuring index {settings.pinecone_index!r}"
+              + (" (deleting existing vectors)" if args.recreate else ""))
+        store.ensure(dimension, recreate=args.recreate)
+
+        records = [
+            {
+                "id": node.id,
+                "values": vector,
+                "metadata": {"node_id": node.id, "name": node.name, "kind": node.kind},
+            }
+            for node, vector in zip(nodes, vectors)
+        ]
+        written = store.upsert(records)
+    except (EmbeddingError, PineconeError) as exc:
+        print(f"embed failed: {exc}", file=sys.stderr)
+        return 1
+
+    stats = store.stats()
+    namespaces = stats.get("namespaces") or {}
+    total = (sum(int(ns.get("vectorCount") or 0) for ns in namespaces.values())
+             if namespaces else int(stats.get("totalVectorCount") or 0))
+    print(f"WROTE {written} vectors to {settings.pinecone_index!r} "
+          f"({total} in the index, dimension {stats.get('dimension')})")
+    print("  the app is reading this index -- restart it to pick up the change")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Build data/processed_data/campus_graph.json from the authored GeoJSON")
@@ -757,6 +814,12 @@ def main(argv: list[str] | None = None) -> int:
     graph.add_argument("--keep-decor", action="store_true",
                        help="also route to benches, trees and other street furniture")
     graph.set_defaults(func=cmd_graph)
+
+    embed = sub.add_parser(
+        "embed", help="embed every place name and load the Pinecone index the app reads")
+    embed.add_argument("--recreate", action="store_true",
+                       help="delete every vector in the index before writing")
+    embed.set_defaults(func=cmd_embed)
 
     args = parser.parse_args(argv)
     return args.func(args)

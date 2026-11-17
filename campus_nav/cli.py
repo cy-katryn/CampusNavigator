@@ -12,9 +12,12 @@ import sys
 
 from .config import get_settings, graph_path, rel
 from .dialogue import Dialogue
+from .embeddings import EmbeddingError
 from .graph import CampusGraph
 from .llm import DeepSeekClient
 from .narrate import Narrator
+from .pinecone import PineconeError
+from .place_index import PlaceIndex, PlaceIndexError
 from .search import compare
 
 DEMO_SCRIPT = [
@@ -24,7 +27,7 @@ DEMO_SCRIPT = [
 ]
 
 
-def banner(settings, graph: CampusGraph, source_label: str) -> str:
+def banner(settings, graph: CampusGraph, source_label: str, place_index_line: str = "") -> str:
     return (
         "=" * 70 + "\n"
         "  COMP4431 Group 21 - Campus Navigator\n"
@@ -32,7 +35,8 @@ def banner(settings, graph: CampusGraph, source_label: str) -> str:
         f"  source : {source_label}\n"
         f"  parser : {settings.mode_label}\n"
         f"  model  : {settings.model}\n"
-        "  type /help for commands, /quit to exit\n"
+        + (f"  places : {place_index_line}\n" if place_index_line else "")
+        + "  type /help for commands, /quit to exit\n"
         + "=" * 70
     )
 
@@ -100,9 +104,20 @@ def main(argv: list[str] | None = None) -> int:
 
     client = DeepSeekClient(settings) if settings.llm_available else None
     narrator = Narrator(client) if settings.narration_available else None
-    dialogue = Dialogue(graph, client, narrator)
 
-    print(banner(settings, graph, rel(path)))
+    # Place names come from the embedding index, so there is nothing to fall back on:
+    # say exactly what is missing and stop, rather than failing mid-conversation.
+    places = PlaceIndex(graph, settings)
+    try:
+        index_info = places.check()
+    except (PlaceIndexError, EmbeddingError, PineconeError) as exc:
+        print(f"place index unavailable: {exc}", file=sys.stderr)
+        return 2
+    place_line = f"{index_info['index']} ({index_info['vectors']} vectors)"
+
+    dialogue = Dialogue(graph, client, narrator, places=places)
+
+    print(banner(settings, graph, rel(path), place_line))
     if not settings.llm_available:
         print("  note: no DEEPSEEK_API_KEY found - running on the grammar parser only.\n")
 

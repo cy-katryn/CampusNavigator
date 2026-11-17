@@ -38,6 +38,14 @@ GRAPH_FILE = PROCESSED_DIR / "campus_graph.json"
 
 DEFAULT_MODEL = "deepseek-chat"
 
+# Place-name matching is dense retrieval: the question is embedded, and the nearest
+# place names are read back from Pinecone. GitHub Models' inference API was retired on
+# 2026-07-30, so the default points at its documented successor shape (an
+# OpenAI-compatible /embeddings endpoint) and can be repointed with EMBEDDINGS_BASE_URL.
+DEFAULT_EMBEDDINGS_BASE_URL = "https://models.github.ai/inference"
+DEFAULT_EMBEDDINGS_MODEL = "openai/text-embedding-3-large"
+DEFAULT_PINECONE_INDEX = "campus-navigator-places"
+
 
 def rel(path: Path) -> str:
     """Path relative to the project root, for messages that a person reads."""
@@ -80,6 +88,13 @@ def _int(name: str, default: int) -> int:
         return default
 
 
+def _float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, "") or default)
+    except ValueError:
+        return default
+
+
 @dataclass(frozen=True)
 class Settings:
     api_key: str
@@ -88,11 +103,28 @@ class Settings:
     timeout_s: int
     narrate: bool = True
     base_url: str = "https://api.deepseek.com/v1"
+    # -- place-name retrieval (embeddings + Pinecone), not the fact knowledge base
+    embeddings_api_key: str = ""
+    embeddings_model: str = DEFAULT_EMBEDDINGS_MODEL
+    embeddings_base_url: str = DEFAULT_EMBEDDINGS_BASE_URL
+    pinecone_api_key: str = ""
+    pinecone_index: str = DEFAULT_PINECONE_INDEX
+    pinecone_namespace: str = ""
+    pinecone_cloud: str = "aws"
+    pinecone_region: str = "us-east-1"
+    place_top_k: int = 8
+    place_min_similarity: float = 0.35
+    place_ambiguity_band: float = 0.04
 
     @property
     def llm_available(self) -> bool:
         """True only when the LLM layer is switched on AND a key is configured."""
         return self.llm_enabled and bool(self.api_key)
+
+    @property
+    def vectors_available(self) -> bool:
+        """Place-name resolution needs both an embedding key and an index key."""
+        return bool(self.embeddings_api_key and self.pinecone_api_key)
 
     @property
     def narration_available(self) -> bool:
@@ -116,6 +148,28 @@ def get_settings() -> Settings:
         llm_enabled=_flag("LLM_ENABLED", True),
         timeout_s=_int("LLM_TIMEOUT", 20),
         narrate=_flag("LLM_NARRATE", True),
+        embeddings_api_key=(
+            os.environ.get("EMBEDDINGS_API_KEY", "") or os.environ.get("GITHUB_TOKEN", "")
+        ).strip(),
+        embeddings_model=(
+            os.environ.get("EMBEDDINGS_MODEL", DEFAULT_EMBEDDINGS_MODEL).strip()
+            or DEFAULT_EMBEDDINGS_MODEL
+        ),
+        embeddings_base_url=(
+            (os.environ.get("EMBEDDINGS_BASE_URL", DEFAULT_EMBEDDINGS_BASE_URL).strip()
+             or DEFAULT_EMBEDDINGS_BASE_URL).rstrip("/")
+        ),
+        pinecone_api_key=os.environ.get("PINECONE_API_KEY", "").strip(),
+        pinecone_index=(
+            os.environ.get("PINECONE_INDEX", DEFAULT_PINECONE_INDEX).strip()
+            or DEFAULT_PINECONE_INDEX
+        ),
+        pinecone_namespace=os.environ.get("PINECONE_NAMESPACE", "").strip(),
+        pinecone_cloud=os.environ.get("PINECONE_CLOUD", "aws").strip() or "aws",
+        pinecone_region=os.environ.get("PINECONE_REGION", "us-east-1").strip() or "us-east-1",
+        place_top_k=_int("PLACE_TOP_K", 8),
+        place_min_similarity=_float("PLACE_MIN_SIMILARITY", 0.35),
+        place_ambiguity_band=_float("PLACE_AMBIGUITY_BAND", 0.04),
     )
 
 

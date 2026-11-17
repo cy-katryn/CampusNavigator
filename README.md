@@ -15,7 +15,15 @@ python -m campus_nav.web --open      # web app  ->  http://127.0.0.1:8000
 python -m campus_nav.cli --demo      # the same three turns in a terminal
 ```
 
-Python 3.10+ to run it — the standard library only, nothing to install, no network.
+Python 3.10+ to run it — the Python code uses the standard library only, so there is
+nothing to `pip install`. Two things must still be configured in `.env` (copy
+`.env.example`): an embeddings endpoint key and a Pinecone key, because **place names
+are resolved by vector search, not by keyword matching**. Build that index once:
+
+```bash
+python tools/build.py embed      # embeds every place name into Pinecone
+```
+
 The interface ships as a committed bundle, so no build step is needed to demo it.
 
 The graph is read from `data/processed_data/campus_graph.json` **once, at startup**: after
@@ -39,11 +47,15 @@ stylesheet keeps only what a utility cannot express: the palette, the avatar's p
 state animations, and the map layers the drawing code creates by class name.
 
 Every message goes to the deterministic grammar parser first, and template replies narrate
-the result, so the app works with no API key at all — that is the mode to fall back on if
-the demo Wi-Fi fails. With a key in `.env` (see `.env.example`) the model is consulted only
-when the grammar finds nothing usable (no intent, or a route whose place words match no
-node), and it phrases the sentence; it never chooses the route and never states a fact that
-was not computed.
+the result. The grammar decides the *shape* of the request; the place words inside it are
+resolved by embedding the phrase and reading the nearest place names back from Pinecone
+(`campus_nav/place_index.py`). There is deliberately no lexical fallback: if the index is
+unreachable the app says so instead of guessing a building.
+
+With a DeepSeek key in `.env` (see `.env.example`) the model is consulted only when the
+grammar finds nothing usable (no intent, or a route whose place words match no node), and
+it phrases the sentence; it never chooses the route and never states a fact that was not
+computed.
 
 ## Group members
 
@@ -121,6 +133,7 @@ Four authored inputs, one generated file the app reads:
 
 ```bash
 python tools/build.py graph          # rebuild after editing any GeoJSON
+python tools/build.py embed          # embed every place name into Pinecone
 python tools/build.py gaps           # where the walkway network does not join up
 python tools/build.py audit          # what is wrong with the structures file
 python tools/build.py names          # place names that will read badly
@@ -135,10 +148,10 @@ than inventing a route. To change the map: edit a GeoJSON in `data/authored/`, r
 
 | Path | What |
 |---|---|
-| `campus_nav/` | the application: graph, A*/UCS search, dialogue, NLU, knowledge base, web server |
+| `campus_nav/` | the application: graph, A*/UCS search, dialogue, NLU, knowledge base, place index (embeddings + Pinecone), web server |
 | `web/` | the interface source: React 18 + TypeScript, styled with Tailwind, icons from Lucide, built by Vite |
 | `campus_nav/static/` | **generated** — the built interface the server serves |
-| `tools/build.py` | build, audit, gaps, name report |
+| `tools/build.py` | build, embed, audit, gaps, name report |
 | `data/raw_data/` | what Overpass and the PolyU sites published, untouched |
 | `data/authored/` | the GeoJSON you draw and edit |
 

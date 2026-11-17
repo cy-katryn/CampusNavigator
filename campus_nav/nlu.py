@@ -12,16 +12,21 @@ Two parsers share one output type, and `parse` runs them in that order:
                           returns None and the grammar result stands.
 
 The LLM never decides a route and never invents a place id: unknown place text is
-kept as raw text and resolved against the graph afterwards. That is a deliberate
-architectural boundary, not a limitation.
+kept as raw text and resolved against the place index (embeddings + Pinecone)
+afterwards. That is a deliberate architectural boundary, not a limitation.
 """
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field     
+from dataclasses import dataclass, field
+from typing import Any
 
-from .graph import CampusGraph, Node
+from .graph import CampusGraph
 from .llm import DeepSeekClient
+
+# The resolver every grammar rule consults: PlaceIndex.resolve(text) -> list[Node].
+# It is passed in rather than imported so the rules stay testable without a network.
+PlaceResolver = Any
 
 INTENTS = (
     "route",          # find a way from A to B
@@ -130,9 +135,10 @@ def parse_with_llm(text: str, graph: CampusGraph, client: DeepSeekClient) -> Slo
         """Keep a valid node id; keep the user's own wording for anything else.
 
         An id the model invented is never trusted, but the *text* is not thrown away:
-        it is resolved against the graph afterwards by Dialogue._preferred_matches().
-        This is the boundary the module docstring describes -- the model may report
-        what the user said, it may not create a place.
+        it is resolved against the place index afterwards by
+        Dialogue._preferred_matches(). This is the boundary the module docstring
+        describes -- the model may report what the user said, it may not create a
+        place.
         """
         if not isinstance(value, str) or not value.strip():
             return ""
@@ -320,7 +326,7 @@ _ZH_CHOICE = re.compile(r"第\s*([一二兩两三四五六七八九十1-9])\s*(?
 _ZH_ROUTE_ACTION = re.compile(r"[帶带]我|怎[么麼]去|[點点]去|去第|去[那嗰]|去最近|[導导]航|怎[么麼]走|[點点]行")
 
 
-def _chinese_facility(text: str, graph: CampusGraph) -> Slots | None:
+def _chinese_facility(text: str, places: PlaceResolver) -> Slots | None:
     if not re.search(r"[\u3400-\u9fff]", text):
         return None
     phrase = text.strip(" ?？!！.。，")
@@ -350,7 +356,7 @@ def _chinese_facility(text: str, graph: CampusGraph) -> Slots | None:
             slots.facility_choice = 0
         slots.facility_target = place_words
         return slots
-    explicit_route = names_destination(phrase, graph)
+    explicit_route = names_destination(phrase, places)
     if explicit_route and not (_ZH_WHERE.search(phrase) and not _ZH_ROUTE_ACTION.search(phrase)):
         return None
     if item and (_ZH_WHERE.search(phrase) or item == "recycling" or not explicit_route):
@@ -434,24 +440,7 @@ def refers_to_last_distance(text: str) -> bool:
     return bool(_DISTANCE_FOLLOWUP.fullmatch(route_text.rstrip("？！。?!. ")))
 
 
-_CAMPUS_TRADITIONAL = str.maketrans("图书馆赛马会创楼栋", "圖書館賽馬會創樓棟")
-
-
-def map_spelling(text: str) -> str:
-    """Normalize common campus names to the map's traditional Chinese aliases."""
-    return re.sub(r"([A-Za-z]+)\s+(座|棟)", r"\1\2", text.translate(_CAMPUS_TRADITIONAL))
-
-
-def _named_by(node: Node, phrase: str) -> bool:
-    labels = (node.name, node.id, node.name_zh, *re.findall(r"[（(]([^（）()]+)[）)]", node.name_zh))
-    if any(phrase == label.casefold() for label in labels):
-        return True
-    # Abbreviated Chinese place names, e.g. 圖書館 in 包玉剛圖書館.
-    return bool(re.fullmatch(r"[\u3400-\u9fff]{2,}", phrase) and
-                any(label.endswith(phrase) for label in labels))
-
-
-def _route_pair(text: str, graph: CampusGraph) -> re.Match | None:
+def _route_pair(text: str, places: PlaceResolver) -> re.Match | None:
     pair = (_FROM_TO.search(text) or _AT_AND_GO.search(text) or _TO_FROM.search(text) or _DISTANCE_BETWEEN.search(text)
             or _ZH_TO_FROM.search(text) or _ZH_PAIR.search(text))
     chinese_clause = text.rstrip(" 。！？?!")
@@ -464,9 +453,8 @@ def _route_pair(text: str, graph: CampusGraph) -> re.Match | None:
             pair = short
         elif short:
             # Bare "图书馆到赛马会创新楼" has no other instruction words. Only
-            # accept this shorthand if both sides are names on the campus map.
-            names = (map_spelling(name).strip().casefold() for name in short.group("o", "d"))
-            if all(any(_named_by(node, name) for node in graph.nodes.values()) for name in names):
+            # accept this shorthand if both sides name a place in the index.
+            if all(places.resolve(name) for name in short.group("o", "d")):
                 pair = short
     if pair is None and not _EN_COMMAND.search(text):
         pair = _PLACE_TO_PLACE.match(text)
@@ -479,22 +467,22 @@ def _clean_endpoint(text: str) -> str:
     return _clean_place(re.sub(r"出[發发]$", "", text).strip())
 
 
-def names_destination(text: str, graph: CampusGraph) -> bool:
+def names_destination(text: str, places: PlaceResolver) -> bool:
     """A directed request must not be mistaken for a bare clarification."""
-    return bool(_TO_ONLY.search(text) or _ZH_TO.match(text.strip()) or _route_pair(text.strip(), graph))
+    return bool(_TO_ONLY.search(text) or _ZH_TO.match(text.strip()) or _route_pair(text.strip(), places))
 
 
-def parse_with_grammar(text: str, graph: CampusGraph) -> Slots:
+def parse_with_grammar(text: str, places: PlaceResolver) -> Slots:
     lowered, avoid_stairs = stair_request(text)
 
-    facility = _chinese_facility(lowered, graph)
+    facility = _chinese_facility(lowered, places)
     if facility:
         facility.avoid_stairs = avoid_stairs
         return facility
 
     if _RESET.match(lowered):
         return Slots(intent="reset", source="grammar")
-    if _HELP.search(lowered) and not names_destination(lowered, graph):
+    if _HELP.search(lowered) and not names_destination(lowered, places):
         return Slots(intent="help", source="grammar")
     if REOPEN.search(lowered):
         return Slots(intent="close", closed_text=lowered.strip(), source="grammar")
@@ -506,7 +494,7 @@ def parse_with_grammar(text: str, graph: CampusGraph) -> Slots:
     # "explicit route" means the sentence really said from/to. A bare place name
     # ("is the 7-Eleven open") must not be read as a route request.
     explicit_route = False
-    m = _route_pair(lowered, graph)
+    m = _route_pair(lowered, places)
     if m:
         origin_text = _clean_endpoint(m.group("o"))
         destination_text = _clean_endpoint(m.group("d"))
@@ -515,7 +503,7 @@ def parse_with_grammar(text: str, graph: CampusGraph) -> Slots:
         m2 = _ZH_TO.match(lowered) or _TO_ONLY.search(lowered)
         if m2:
             cand = _clean_endpoint(m2.group("d"))
-            if m2.re is _ZH_TO or _DEST_REQUEST.search(lowered) or graph.resolve(cand):
+            if m2.re is _ZH_TO or _DEST_REQUEST.search(lowered) or places.resolve(cand):
                 destination_text = cand
                 explicit_route = True
 
@@ -527,7 +515,7 @@ def parse_with_grammar(text: str, graph: CampusGraph) -> Slots:
 
     # A place mentioned without "to/from" (e.g. "the library?") still counts.
     if not destination_text:
-        hits = graph.resolve(lowered)
+        hits = places.resolve(lowered)
         if len(hits) == 1:
             destination_text = hits[0].name
 
@@ -604,7 +592,7 @@ def parse_with_grammar(text: str, graph: CampusGraph) -> Slots:
     )
 
 
-def _grammar_understood(slots: Slots, graph: CampusGraph) -> bool:
+def _grammar_understood(slots: Slots, places: PlaceResolver) -> bool:
     """Whether the rules produced something worth trusting on their own.
 
     A parse fails when the rules found no intent at all, or when they found a
@@ -615,15 +603,16 @@ def _grammar_understood(slots: Slots, graph: CampusGraph) -> bool:
         return False
     if slots.intent in ("route", "distance"):
         phrases = [p for p in (slots.origin_text, slots.destination_text) if p]
-        if phrases and not any(graph.resolve(p) for p in phrases):
+        if phrases and not any(places.resolve(p) for p in phrases):
             return False
     return True
 
 
-def parse(text: str, graph: CampusGraph, client: DeepSeekClient | None) -> Slots:
+def parse(text: str, graph: CampusGraph, client: DeepSeekClient | None,
+          places: PlaceResolver) -> Slots:
     """Parse with the deterministic grammar first, asking the model only on failure."""
-    grammar = parse_with_grammar(text, graph)
-    if _grammar_understood(grammar, graph):
+    grammar = parse_with_grammar(text, places)
+    if _grammar_understood(grammar, places):
         return grammar
 
     route_text, avoid_stairs = stair_request(text)
@@ -638,11 +627,12 @@ def parse(text: str, graph: CampusGraph, client: DeepSeekClient | None) -> Slots
     if grammar.intent in ("route", "distance"):
         # The rules found the shape but not the place. Keep the user's wording as
         # the authority on word order, and accept a model id only in the slot
-        # whose words actually name that node.
+        # whose words actually resolve to that node in the index.
         for name in ("origin_text", "destination_text"):
             phrase = getattr(grammar, name)
             node = graph.nodes.get(getattr(llm, name))
-            if phrase and node and _named_by(node, map_spelling(phrase).casefold()):
+            resolved = {hit.id for hit in places.resolve(phrase)} if phrase else set()
+            if node is not None and node.id in resolved:
                 setattr(grammar, name, getattr(llm, name))
         if llm.intent in ("route", "distance"):
             grammar.origin_text = grammar.origin_text or llm.origin_text

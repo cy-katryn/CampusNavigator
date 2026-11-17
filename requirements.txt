@@ -8,6 +8,9 @@
 # fastapi>=0.110
 # uvicorn>=0.27
 
-# --- optional: dense retrieval later (hybrid RAG upgrade) -----------------
-# sentence-transformers>=3.0
+# --- optional: the fact knowledge base, if you want its ranking library ---------
 # rank-bm25>=0.2.2
+#
+# Place-name matching does NOT need a package: campus_nav/embeddings.py and
+# campus_nav/pinecone.py speak HTTP with urllib, to an OpenAI-compatible
+# /embeddings endpoint and to Pinecone's REST API.
