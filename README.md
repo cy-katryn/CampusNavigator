@@ -122,7 +122,6 @@ python tools/build.py graph          # rebuild after editing any GeoJSON
 python tools/build.py gaps           # where the walkway network does not join up
 python tools/build.py audit          # what is wrong with the structures file
 python tools/build.py names          # place names that will read badly
-python -m unittest discover -s tests # run the tests
 ```
 
 `tools/build.py` is deterministic arithmetic on what you drew. It measures along your lines,
@@ -140,13 +139,12 @@ than inventing a route. To change the map: edit a GeoJSON in `data/authored/`, r
 | `tools/build.py` | build, audit, gaps, name report |
 | `data/raw_data/` | what Overpass and the PolyU sites published, untouched |
 | `data/authored/` | the GeoJSON you draw and edit |
-| `tests/` | unittest suite, including voice and route regressions |
 
 ## Known limitations
 
 - **Opening hours are not linked to the map yet.** The knowledge base holds the published
   tables, but the join to the OSM-authored nodes was severed when the node set was rebuilt,
-  so hours questions currently answer abstain. Some opening-hours tests still expose this gap.
+  so hours questions currently answer abstain.
 - **No indoor geometry.** A facility inside a building is reached through the building; the
   reply gives the floor, not a corridor. Lifts and internal stairs are not modelled.
 - **The walkway network has gaps.** Footways that pass metres apart without a shared node

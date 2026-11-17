@@ -1,5 +1,5 @@
 # The core package is deliberately dependency-free (Python 3.10+ standard library only).
-# You do NOT need to install anything to run the CLI demo or the tests.
+# You do NOT need to install anything to run the CLI demo.
 #
 # --- web UI: deliberately nothing to install -------------------------------
 # The web interface (campus_nav/web.py) is built on http.server from the standard
@@ -7,9 +7,6 @@
 # If you ever swap it for FastAPI, this is where that dependency would go:
 # fastapi>=0.110
 # uvicorn>=0.27
-
-# --- optional: nicer tests -------------------------------------------------
-# pytest>=8.0
 
 # --- optional: dense retrieval later (hybrid RAG upgrade) -----------------
 # sentence-transformers>=3.0

@@ -8,9 +8,7 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
-.pytest_cache/
 .mypy_cache/
-pytest-cache-files-*/
 
 # --- runtime artefacts ---------------------------------------------------
 logs/
@@ -33,9 +31,6 @@ Thumbs.db
 .tmp_*
 *.bak
 *.orig
-
-# test scratch output
-tests/_tmp/
 
 # archived out-of-scope work
 _archive_hk_wide/
