@@ -38,10 +38,12 @@ block in `web/src/styles.css`; icons come from [Lucide](https://lucide.dev). Tha
 stylesheet keeps only what a utility cannot express: the palette, the avatar's paint and
 state animations, and the map layers the drawing code creates by class name.
 
-Without an API key the app runs on its grammar parser and template replies, which is the
-mode to fall back on if the demo Wi-Fi fails. With a key in `.env` (see `.env.example`) the
-model fills the slots and phrases the sentence; it never chooses the route and never states
-a fact that was not computed.
+Every message goes to the deterministic grammar parser first, and template replies narrate
+the result, so the app works with no API key at all — that is the mode to fall back on if
+the demo Wi-Fi fails. With a key in `.env` (see `.env.example`) the model is consulted only
+when the grammar finds nothing usable (no intent, or a route whose place words match no
+node), and it phrases the sentence; it never chooses the route and never states a fact that
+was not computed.
 
 ## Group members
 

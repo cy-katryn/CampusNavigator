@@ -1,12 +1,15 @@
 """Turn a sentence into slots.
 
-Two parsers share one output type:
+Two parsers share one output type, and `parse` runs them in that order:
 
-  * `parse_with_llm`   -- asks the model for strict JSON, then validates it.
+  * `parse_with_grammar` -- deterministic regex rules. This is the primary path
+                          and the guaranteed one: the live demo can run with the
+                          network unplugged.
+  * `parse_with_llm`   -- asks the model for strict JSON, then validates it. Only
+                          consulted when the grammar finds nothing usable (no
+                          intent, or a route whose place words match nothing).
                           Any failure (no key, timeout, bad JSON, invented place)
-                          returns None and the caller falls through.
-  * `parse_with_grammar` -- deterministic regex rules. This is the guaranteed
-                          path: the live demo can run with the network unplugged.
+                          returns None and the grammar result stands.
 
 The LLM never decides a route and never invents a place id: unknown place text is
 kept as raw text and resolved against the graph afterwards. That is a deliberate
@@ -601,44 +604,48 @@ def parse_with_grammar(text: str, graph: CampusGraph) -> Slots:
     )
 
 
-def parse(text: str, graph: CampusGraph, client: DeepSeekClient | None) -> Slots:
-    """Ask the model first, retaining explicitly named endpoints when omitted."""
-    route_text, avoid_stairs = stair_request(text)
-    if client is not None and client.settings.llm_available:
-        facility = _chinese_facility(route_text, graph)
-        if facility:
-            facility.avoid_stairs = avoid_stairs
-            return facility
-    if (not route_text or client is None or not client.settings.llm_available
-            or refers_to_last_distance(route_text)):
-        return parse_with_grammar(text, graph)
-    llm = parse_with_llm(route_text, graph, client)
-    if llm is None:
-        return parse_with_grammar(text, graph)
-    llm.avoid_stairs = avoid_stairs
-    if avoid_stairs is not None and llm.intent == "out_of_scope":
-        return parse_with_grammar(text, graph)
+def _grammar_understood(slots: Slots, graph: CampusGraph) -> bool:
+    """Whether the rules produced something worth trusting on their own.
 
-    if names_destination(route_text, graph):
-        grammar = parse_with_grammar(text, graph)
-        if grammar.intent in ("route", "distance"):
-            if grammar.origin_text and grammar.destination_text:
-                # The user's word order determines the roles. Accept a model's
-                # canonical ID only in the slot whose words actually name it.
-                for field in ("origin_text", "destination_text"):
-                    phrase = getattr(grammar, field)
-                    value = getattr(llm, field)
-                    node = graph.nodes.get(value)
-                    if node and _named_by(node, map_spelling(phrase).casefold()):
-                        setattr(grammar, field, value)
-                if (llm.intent == grammar.intent and not llm.closed_text
-                        and llm.origin_text == grammar.origin_text
-                        and llm.destination_text == grammar.destination_text):
-                    return llm
-                return grammar
-            if llm.intent == "out_of_scope":
-                return grammar
-            if llm.intent in ("route", "distance"):
-                llm.origin_text = llm.origin_text or grammar.origin_text
-                llm.destination_text = llm.destination_text or grammar.destination_text
+    A parse fails when the rules found no intent at all, or when they found a
+    route/distance request whose place words match nothing on the map -- that is
+    exactly the paraphrase the model can still rescue.
+    """
+    if slots.intent == "out_of_scope":
+        return False
+    if slots.intent in ("route", "distance"):
+        phrases = [p for p in (slots.origin_text, slots.destination_text) if p]
+        if phrases and not any(graph.resolve(p) for p in phrases):
+            return False
+    return True
+
+
+def parse(text: str, graph: CampusGraph, client: DeepSeekClient | None) -> Slots:
+    """Parse with the deterministic grammar first, asking the model only on failure."""
+    grammar = parse_with_grammar(text, graph)
+    if _grammar_understood(grammar, graph):
+        return grammar
+
+    route_text, avoid_stairs = stair_request(text)
+    if not route_text or client is None or not client.settings.llm_available:
+        return grammar
+
+    llm = parse_with_llm(route_text, graph, client)
+    if llm is None or llm.intent == "out_of_scope":
+        return grammar
+    llm.avoid_stairs = avoid_stairs
+
+    if grammar.intent in ("route", "distance"):
+        # The rules found the shape but not the place. Keep the user's wording as
+        # the authority on word order, and accept a model id only in the slot
+        # whose words actually name that node.
+        for name in ("origin_text", "destination_text"):
+            phrase = getattr(grammar, name)
+            node = graph.nodes.get(getattr(llm, name))
+            if phrase and node and _named_by(node, map_spelling(phrase).casefold()):
+                setattr(grammar, name, getattr(llm, name))
+        if llm.intent in ("route", "distance"):
+            grammar.origin_text = grammar.origin_text or llm.origin_text
+            grammar.destination_text = grammar.destination_text or llm.destination_text
+        return grammar
     return llm
