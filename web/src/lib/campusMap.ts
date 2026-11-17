@@ -118,6 +118,12 @@ export class CampusMap {
     this.nodes = new Map(graph.nodes.map((node) => [node.id, node]));
     this.setupProjection();
     this.drawGraph();
+    // Routes and facilities can arrive *before* the graph does -- the browser restores a
+    // saved conversation on load, and its route is pushed while the /api/graph request is
+    // still in flight. They were drawn then with no projection and threw on the first
+    // coordinate. Redrawing here makes the order of those two requests irrelevant.
+    if (this.routes.length) this.setRoutes(this.routes, this.selectedRoute);
+    if (this.facilities.length) this.renderFacilities();
   }
 
   setHiddenCategories(hidden: Set<string>): void {
@@ -145,6 +151,9 @@ export class CampusMap {
   setRoutes(routes: RouteOption[], selected: number): void {
     this.routes = routes;
     this.selectedRoute = selected;
+    // Framing the route projects its coordinates, so this waits for the graph too; the
+    // request is remembered and applied by setGraph().
+    if (!this.bounds) return;
     this.renderRoutes();
     const chosen = routes[Math.max(0, Math.min(selected, routes.length - 1))];
     if (chosen) this.fitTo(this.routeExtent(chosen));
@@ -201,7 +210,9 @@ export class CampusMap {
   /** The route layer alone: called again when only the zoom (and so the pin size) moved. */
   private renderRoutes(): void {
     const layer = layerOf('layer-route');
-    if (!layer) return;
+    // No projection yet means no coordinates yet: the graph has not arrived. setGraph()
+    // redraws whatever is waiting as soon as it has one.
+    if (!layer || !this.bounds) return;
     layer.innerHTML = '';
     this.svg.classList.toggle('no-links', !this.showLinks);
     const routes = this.routes;
@@ -302,7 +313,7 @@ export class CampusMap {
 
   private renderFacilities(): void {
     const layer = layerOf('layer-facilities');
-    if (!layer) return;
+    if (!layer || !this.bounds) return;
     layer.innerHTML = '';
     this.facilities.forEach((facility) => {
       if (facility.lat == null || facility.lng == null) return;
