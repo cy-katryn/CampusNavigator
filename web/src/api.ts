@@ -26,17 +26,28 @@ export async function sendChat(text: string, lang: string, endpoints?: Partial<R
   return (await response.json()) as ChatPayload;
 }
 
+export interface SettingsPayload {
+  apiKey?: string | null;
+  model?: string | null;
+  embeddingsApiKey?: string | null;
+  pineconeApiKey?: string | null;
+}
+
 export async function saveSettings(
-  apiKey: string | null,
-  model: string | null,
+  payload: SettingsPayload,
 ): Promise<{ status: Status; env: string }> {
   const response = await fetch('/api/settings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ api_key: apiKey, model }),
+    body: JSON.stringify({
+      api_key: payload.apiKey,
+      model: payload.model,
+      embeddings_api_key: payload.embeddingsApiKey,
+      pinecone_api_key: payload.pineconeApiKey,
+    }),
   });
-  const payload = await readJSON<{ status: Status; env: string; ok: boolean }>(response);
-  return { status: payload.status, env: payload.env };
+  const saved = await readJSON<{ status: Status; env: string; ok: boolean }>(response);
+  return { status: saved.status, env: saved.env };
 }
 
 export async function resetSession(): Promise<void> {

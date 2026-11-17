@@ -1,3 +1,4 @@
+import { X } from 'lucide-react';
 import { LEGEND } from '../lib/geo';
 
 const CHIP =
@@ -15,6 +16,7 @@ export interface LayerLegendProps {
   onToggleLinks(): void;
   onShowAll(): void;
   onHideAll(): void;
+  onHide(): void;
 }
 
 function stateClass(off: boolean): string {
@@ -37,6 +39,19 @@ export function LayerLegend(props: LayerLegendProps) {
 
   return (
     <div className="absolute bottom-[30px] left-3 z-[4] flex w-max max-w-[264px] flex-col gap-1.5 rounded-xl border border-line bg-panel-glass px-[11px] py-[9px] text-[11px] text-muted shadow-[0_6px_18px_var(--accent-ring)] backdrop-blur-[6px]">
+      <div className="flex items-center justify-between gap-2">
+        <span className={HEAD}>Legend</span>
+        <button
+          type="button"
+          onClick={props.onHide}
+          title="Hide the legend — the map is underneath it"
+          aria-label="Hide the legend"
+          className="-mr-1 -mt-0.5 grid h-5 w-5 cursor-pointer place-items-center rounded text-muted transition hover:bg-accent-soft hover:text-ink"
+        >
+          <X size={12} aria-hidden="true" />
+        </button>
+      </div>
+
       {LEGEND.map((section) => (
         <div key={section.id} className="flex max-w-[238px] flex-col gap-1">
           <button

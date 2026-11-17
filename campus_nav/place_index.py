@@ -135,6 +135,21 @@ class PlaceIndex:
         info["warning"] = self.warning
         return info
 
+    def reconfigure(self, settings: Settings) -> dict:
+        """Adopt new keys (from the Settings dialog) and re-probe the index.
+
+        The embedder and the store captured the old settings when they were built, so
+        they are rebuilt here. Never fatal: a key that does not work leaves the index in
+        lexical mode with the reason stated, exactly as a cold start would.
+        """
+        self.settings = settings
+        self.embedder = EmbeddingClient(settings)
+        self.store = PineconeStore(settings)
+        self.mode = MODE_LEXICAL
+        self.warning = ""
+        self._cache.clear()
+        return self.check()
+
     def degrade(self, reason: object) -> None:
         """Give up on the dense index for this session and say why, once."""
         if self.mode == MODE_LEXICAL:

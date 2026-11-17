@@ -131,9 +131,22 @@ export interface Status {
   mode: string;
   model: string;
   api_key_present: boolean;
+  /** Whether a key for the embeddings endpoint is stored. */
+  embeddings_key_present?: boolean;
+  /** Whether a vector-store key is stored. */
+  pinecone_key_present?: boolean;
+  embeddings_model?: string;
+  embeddings_base_url?: string;
   nodes: number;
   edges: number;
   knowledge?: KnowledgeStatus;
+  /** Which place-name resolver is live, and why it fell back if it did. */
+  places?: {
+    index: string;
+    vectors: number;
+    mode: string;
+    warning?: string;
+  };
 }
 
 export type Role = 'user' | 'bot';

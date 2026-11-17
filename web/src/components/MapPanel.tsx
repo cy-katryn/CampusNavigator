@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Maximize2, Minus, Map as MapIcon, Plus } from 'lucide-react';
+import { Layers, Maximize2, Minus, Map as MapIcon, Plus } from 'lucide-react';
 import { ALL_LEGEND_KEYS, LEGEND } from '../lib/geo';
 import { CampusMap, type ScaleInfo } from '../lib/campusMap';
 import type { FacilityCard, Graph, GraphNode, RouteOption } from '../types';
@@ -17,6 +17,10 @@ export interface MapPanelProps {
   onSend(text: string): void;
 }
 
+/* The legend covers a real part of the map, so it can be put away; the choice is
+   remembered between visits, which matters when you are demoing and want the map clean. */
+const LEGEND_STORAGE = 'campus-nav.legend';
+
 const TOOL_BTN =
   'grid h-[34px] w-[34px] cursor-pointer place-items-center rounded-lg border border-line ' +
   'bg-panel text-ink shadow-[0_2px_8px_var(--accent-ring)] transition hover:border-brand';
@@ -25,6 +29,13 @@ export function MapPanel(props: MapPanelProps) {
   const svg = useRef<SVGSVGElement>(null);
   const [hidden, setHidden] = useState<Set<string>>(new Set(ALL_LEGEND_KEYS));
   const [showLinks, setShowLinks] = useState(false);
+  const [legendOpen, setLegendOpen] = useState(() => {
+    try {
+      return window.localStorage.getItem(LEGEND_STORAGE) !== 'hidden';
+    } catch {
+      return true;      // storage can be unavailable, and a visible legend is never wrong
+    }
+  });
   const [basemap, setBasemap] = useState(true);
   const [scale, setScale] = useState<ScaleInfo>({ width: 60, label: '' });
   const [tip, setTip] = useState('');
@@ -83,6 +94,15 @@ export function MapPanel(props: MapPanelProps) {
     props.onSend('how do I get to ' + node.name + '?');
   };
 
+  const setLegendVisible = (open: boolean) => {
+    setLegendOpen(open);
+    try {
+      window.localStorage.setItem(LEGEND_STORAGE, open ? 'shown' : 'hidden');
+    } catch {
+      // private mode: the choice simply does not persist
+    }
+  };
+
   const toggleCategory = (key: string) => {
     setHidden((previous) => {
       const next = new Set(previous);
@@ -138,15 +158,28 @@ export function MapPanel(props: MapPanelProps) {
           </div>
         ) : null}
 
-        <LayerLegend
-          hidden={hidden}
-          showLinks={showLinks}
-          onToggleCategory={toggleCategory}
-          onToggleCategoryGroup={toggleGroup}
-          onToggleLinks={() => setShowLinks((on) => !on)}
-          onShowAll={() => setHidden(new Set())}
-          onHideAll={() => setHidden(new Set(ALL_LEGEND_KEYS))}
-        />
+        {legendOpen ? (
+          <LayerLegend
+            hidden={hidden}
+            showLinks={showLinks}
+            onToggleCategory={toggleCategory}
+            onToggleCategoryGroup={toggleGroup}
+            onToggleLinks={() => setShowLinks((on) => !on)}
+            onShowAll={() => setHidden(new Set())}
+            onHideAll={() => setHidden(new Set(ALL_LEGEND_KEYS))}
+            onHide={() => setLegendVisible(false)}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setLegendVisible(true)}
+            title="Show the map legend"
+            className="absolute bottom-[64px] left-3 z-[4] inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-line bg-panel-glass px-2.5 py-[5px] text-[10.5px] text-muted shadow-[0_4px_12px_var(--accent-ring)] backdrop-blur-[6px] transition hover:border-line-strong hover:text-ink"
+          >
+            <Layers size={12} aria-hidden="true" />
+            Legend
+          </button>
+        )}
 
         <div
           aria-hidden="true"

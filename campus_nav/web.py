@@ -54,14 +54,14 @@ from .config import (
     shapes_path,
 )
 from .dialogue import Dialogue, RouteClarification
-from .embeddings import EmbeddingError
+from .embeddings import EmbeddingClient, EmbeddingError
 from .facility_speech import facility_details, facility_summary, local_hours
 from .graph import CampusGraph
 from .kb import KnowledgeBase
 from .llm import DeepSeekClient
 from .local_names import building_name, floor_name, localize_label, place_name
 from .narrate import Narrator
-from .pinecone import PineconeError
+from .pinecone import PineconeError, PineconeStore
 from .place_index import PlaceIndex, PlaceIndexError
 from .places import feature_height, shape_kind
 from .speech import MAX_WAV_BYTES, LocalTranscriber, SpeechError
@@ -446,8 +446,10 @@ class App:
         self.dialogue = Dialogue(self.graph, client, narrator, knowledge=self.knowledge,
                                  places=self.places)
 
-    def apply_settings(self, api_key: str | None = None, model: str | None = None) -> dict:
-        """Persist new model settings and use them immediately, without a restart."""
+    def apply_settings(self, api_key: str | None = None, model: str | None = None,
+                       *, embeddings_api_key: str | None = None,
+                       pinecone_api_key: str | None = None) -> dict:
+        """Persist new settings and use them immediately, without a restart."""
         updates: dict[str, str] = {}
         changes: dict[str, str] = {}
         if api_key is not None:
@@ -456,6 +458,12 @@ class App:
         if model is not None and model.strip():
             updates["DEEPSEEK_MODEL"] = model.strip()
             changes["model"] = model.strip()
+        if embeddings_api_key is not None:
+            updates["EMBEDDINGS_API_KEY"] = embeddings_api_key.strip()
+            changes["embeddings_api_key"] = embeddings_api_key.strip()
+        if pinecone_api_key is not None:
+            updates["PINECONE_API_KEY"] = pinecone_api_key.strip()
+            changes["pinecone_api_key"] = pinecone_api_key.strip()
         if not updates:
             return self.status()
 
@@ -468,6 +476,12 @@ class App:
         narrator = Narrator(client) if self.settings.narration_available else None
         self.dialogue.client = client
         self.dialogue.narrator = narrator
+
+        # A new embeddings or vector-store key changes how place names are resolved, so
+        # the index is re-probed now: the very next message uses the new path instead of
+        # waiting for a restart.
+        if "embeddings_api_key" in changes or "pinecone_api_key" in changes:
+            self.index_info = self.places.reconfigure(self.settings)
         return self.status()
 
     def status(self) -> dict:
@@ -475,6 +489,10 @@ class App:
             "mode": self.settings.mode_label,
             "model": self.settings.model if self.settings.llm_available else "",
             "api_key_present": bool(self.settings.api_key),
+            "embeddings_key_present": bool(self.settings.embeddings_api_key),
+            "pinecone_key_present": bool(self.settings.pinecone_api_key),
+            "embeddings_model": self.settings.embeddings_model,
+            "embeddings_base_url": self.settings.embeddings_base_url,
             "graph_source": rel(GRAPH_FILE),
             "nodes": len(self.graph.nodes),
             "edges": len(self.graph.edges),
@@ -611,18 +629,33 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(chat_payload(self.app.graph, reply, lang))
         if path == "/api/settings":
             payload = self._read_json()
-            api_key = payload.get("api_key")
-            model = payload.get("model")
-            if api_key is not None:
-                api_key = str(api_key).strip()
-                if len(api_key) > 200 or "\n" in api_key or "\r" in api_key:
-                    return self._json({"error": "that does not look like an API key"}, 400)
-            if model is not None:
-                model = str(model).strip()
-                if len(model) > 120 or "\n" in model or "\r" in model:
-                    return self._json({"error": "that does not look like a model id"}, 400)
+            # One shape for every key field: absent means "leave it alone", a string
+            # means "store this". Nothing that arrives here is echoed back.
+            limits = {
+                "api_key": 200,
+                "model": 120,
+                "embeddings_api_key": 200,
+                "pinecone_api_key": 200,
+            }
+            values: dict[str, str | None] = {}
+            for name, limit in limits.items():
+                raw = payload.get(name)
+                if raw is None:
+                    values[name] = None
+                    continue
+                text = str(raw).strip()
+                if len(text) > limit or "\n" in text or "\r" in text:
+                    return self._json(
+                        {"error": f"that does not look like a {name.replace('_', ' ')}"}, 400
+                    )
+                values[name] = text
             with LOCK:
-                status = self.app.apply_settings(api_key, model)
+                status = self.app.apply_settings(
+                    values["api_key"],
+                    values["model"],
+                    embeddings_api_key=values["embeddings_api_key"],
+                    pinecone_api_key=values["pinecone_api_key"],
+                )
             return self._json({"ok": True, "status": status, "env": str(ENV_PATH.name)})
         if path == "/api/reset":
             with LOCK:
