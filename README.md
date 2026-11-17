@@ -2,29 +2,46 @@
 
 **COMP4431 Artificial Intelligence (2026/27) — Group Project · Group 21**
 
-A chatbot that finds walking routes across the PolyU campus, points you at the facilities
-you need — AEDs, water stations, accessible toilets, canteens, clinics,
-faculty offices — and quotes their published opening hours, or says plainly that it does not
-know. Ask in English or Chinese; the answer is spoken aloud and the route draws itself on a
-2.5D campus map.
+A chatbot that guides you through navigating around PolyU campus, and points you to facilities
+you might need (e.g. AEDs, water stations, accessible toilets, canteens, or clinics). You can
+communicate with it in three language: English, Mandarin or Cantonese. It also supports speech
+recognition allowing you to ask for directions hands-free while walking around campus.
 
 ## Run it
 
 ```bash
 python -m campus_nav.web --open      # web app  ->  http://127.0.0.1:8000
-python -m campus_nav.cli --demo      # the same three turns in a terminal
 ```
 
 Python 3.10+ to run it — the Python code uses the standard library only, so there is
-nothing to `pip install`. Two things must still be configured in `.env` (copy
-`.env.example`): an embeddings endpoint key and a Pinecone key, because **place names
-are resolved by vector search, not by keyword matching**. Build that index once:
+nothing to `pip install`. **It runs with an empty `.env`**: no keys means the
+deterministic grammar parses and the built-in scorer resolves place names. Copy
+`.env.example` and add keys to switch individual layers to their model-backed path:
 
 ```bash
-python tools/build.py embed      # embeds every place name into Pinecone
+python tools/build.py embed --recreate   # fill the vector index with every place name
 ```
 
 The interface ships as a committed bundle, so no build step is needed to demo it.
+
+### The layers, and what happens without a key
+
+Each layer has a deterministic twin, so a missing key or a dead network costs coverage,
+never the application. The server prints which path is live at startup, and
+`GET /api/status` exposes the same under `places.mode`.
+
+| layer | primary | fallback | without it |
+|---|---|---|---|
+| understanding | LLM → JSON slots (`nlu.parse_with_llm`) | regex grammar (`nlu.parse_with_grammar`) | fewer phrasings understood; nothing breaks |
+| name identity | embeddings + vector index (`place_index.py`) | built-in word scorer (`lexical.py`) | exact-ish names still resolve; no paraphrases |
+| facts | BM25 over 561 campus-map records (`kb.py`) | — (always local) | — |
+| routing | A* + UCS over the walkway graph (`search.py`) | — (always local, never a model) | — |
+| wording | guarded LLM narration (`narrate.py`) | templates in `dialogue.py` | plainer sentences |
+
+Two rules make this safe rather than optimistic. The model may *report* a place name but
+never create one: `nlu._validated()` accepts a slot only if the resolver recognises it.
+And a model sentence containing a number the engine did not compute is discarded by
+`narrate.grounded_numbers()`. Prompts can be ignored; these two cannot.
 
 The graph is read from `data/processed_data/campus_graph.json` **once, at startup**: after
 `python tools/build.py graph` you must restart the server, or the browser keeps being served
@@ -46,16 +63,15 @@ block in `web/src/styles.css`; icons come from [Lucide](https://lucide.dev). Tha
 stylesheet keeps only what a utility cannot express: the palette, the avatar's paint and
 state animations, and the map layers the drawing code creates by class name.
 
-Every message goes to the deterministic grammar parser first, and template replies narrate
-the result. The grammar decides the *shape* of the request; the place words inside it are
-resolved by embedding the phrase and reading the nearest place names back from Pinecone
-(`campus_nav/place_index.py`). There is deliberately no lexical fallback: if the index is
-unreachable the app says so instead of guessing a building.
+With a DeepSeek key in `.env` the model parses every message into slots
+(intent, origin, destination, closures, stair restrictions) and phrases the reply; it
+never chooses the route and never states a fact that was not computed. Without a key the
+deterministic grammar does the same job for the phrasings it knows, and the app behaves
+identically — it simply understands fewer ways of asking.
 
-With a DeepSeek key in `.env` (see `.env.example`) the model is consulted only when the
-grammar finds nothing usable (no intent, or a route whose place words match no node), and
-it phrases the sentence; it never chooses the route and never states a fact that was not
-computed.
+Place words are matched by embedding the phrase and reading the nearest place names back
+from the vector index (`campus_nav/place_index.py`); when that index is unconfigured or
+unreachable, `campus_nav/lexical.py` scores names directly against the graph instead.
 
 ## Group members
 
@@ -86,12 +102,13 @@ table, and abstains when the data has nothing. When there is more than one way t
 reply lists them — pick one and the map draws it.
 
 ```
-you> how do I get from the main entrance to the library?
-bot> Route: Main Entrance -> Pao Yue-kong Library
-     Total: 230 m over 1 leg, 2 flights of steps
+you> how do I get from Block V to the library?
+bot> Route: Block V (Jockey Club Innovation Tower) -> Pao Yue-Kong Library
+     Total: 206 m over 1 leg, 1 flight of steps
+     Search (astar): expanded 63 nodes, peak frontier 35, 0.32 ms
      There are 2 other ways there:
-       2. 246 m over 1 leg, 1 flight of steps
-       3. 254 m over 1 leg, 1 flight of steps
+       2. 221 m over 1 leg, 1 flight of steps
+       3. 251 m over 1 leg, 2 flights of steps
 ```
 
 ## Using voice navigation
@@ -132,7 +149,7 @@ Three authored inputs, one generated file the app reads:
 
 ```bash
 python tools/build.py graph          # rebuild after editing any GeoJSON
-python tools/build.py embed          # embed every place name into Pinecone
+python tools/build.py embed --recreate   # embed every place name into the vector index
 ```
 
 `tools/build.py` is deterministic arithmetic on what you drew. It measures along your lines,
@@ -144,7 +161,7 @@ than inventing a route. To change the map: edit a GeoJSON in `data/authored/`, r
 
 | Path | What |
 |---|---|
-| `campus_nav/` | the application: graph, A*/UCS search, dialogue, NLU, knowledge base, place index (embeddings + Pinecone), web server |
+| `campus_nav/` | the application: graph, A*/UCS search, dialogue, NLU, knowledge base, place index (embeddings + vector store) and its offline scorer, web server |
 | `web/` | the interface source: React 18 + TypeScript, styled with Tailwind, icons from Lucide, built by Vite |
 | `campus_nav/static/` | **generated** — the built interface the server serves |
 | `tools/build.py` | build the graph, embed the place names |
@@ -153,13 +170,19 @@ than inventing a route. To change the map: edit a GeoJSON in `data/authored/`, r
 
 ## Known limitations
 
-- **Opening hours are not linked to the map yet.** The knowledge base holds the published
-  tables, but the join to the OSM-authored nodes was severed when the node set was rebuilt,
-  so hours questions currently answer abstain.
+- **Opening hours are joined by name, not by id.** The knowledge base holds the published
+  tables (33 of 561 records have one), but the id join between the scraped records and the
+  graph nodes does not match, so hours are found by place name and three records the map
+  cannot name are unreachable. Fixing the key is the next data-plane change.
 - **No indoor geometry.** A facility inside a building is reached through the building; the
   reply gives the floor, not a corridor. Lifts and internal stairs are not modelled.
 - **The walkway network has gaps.** Footways that pass metres apart without a shared node
-  force detours; `python tools/build.py gaps` lists them, priced.
+  force detours, and a place standing more than 120 m from any walkway is attached by one
+  straight connector rather than a path.
+- **The fallback tiers are weaker than the models they replace.** Without an LLM the app
+  understands only phrasings the grammar enumerates; without the vector index a place must
+  be named roughly as the map publishes it. Both are stated in the reply when they matter
+  (`/api/status` reports which mode is live) rather than silently degrading.
 - **Positions are published positions, not a survey.** One campus-map coordinate per building
   is shared by every POI inside it — the floor field is what distinguishes them.
 - **Distances are modelled.** Edge length is measured along the drawn walkway; the last few
@@ -170,4 +193,3 @@ than inventing a route. To change the map: edit a GeoJSON in `data/authored/`, r
 - Walkway geometry: © OpenStreetMap contributors, ODbL.
 - Place names, positions and opening hours: the PolyU campus map.
 - Building outlines derived from the same OpenStreetMap data, edited for this project.
-

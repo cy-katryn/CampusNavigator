@@ -38,11 +38,12 @@ GRAPH_FILE = PROCESSED_DIR / "campus_graph.json"
 DEFAULT_MODEL = "deepseek-chat"
 
 # Place-name matching is dense retrieval: the question is embedded, and the nearest
-# place names are read back from Pinecone. GitHub Models' inference API was retired on
-# 2026-07-30, so the default points at its documented successor shape (an
-# OpenAI-compatible /embeddings endpoint) and can be repointed with EMBEDDINGS_BASE_URL.
-DEFAULT_EMBEDDINGS_BASE_URL = "https://models.github.ai/inference"
-DEFAULT_EMBEDDINGS_MODEL = "openai/text-embedding-3-large"
+# place names are read back from the vector index. Any OpenAI-compatible
+# POST {base}/embeddings endpoint works; the default is Alibaba Cloud Model Studio
+# (DashScope), whose embedding models are multilingual -- which matters here because a
+# campus place name is published in English, Traditional Chinese and Simplified Chinese.
+DEFAULT_EMBEDDINGS_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+DEFAULT_EMBEDDINGS_MODEL = "text-embedding-v4"
 DEFAULT_PINECONE_INDEX = "campus-navigator-places"
 
 
@@ -122,7 +123,11 @@ class Settings:
 
     @property
     def vectors_available(self) -> bool:
-        """Place-name resolution needs both an embedding key and an index key."""
+        """Whether the dense index can be used at all.
+
+        False is not an error: the place index falls back to the built-in lexical
+        scorer (campus_nav/lexical.py), so the app still resolves place names offline.
+        """
         return bool(self.embeddings_api_key and self.pinecone_api_key)
 
     @property
@@ -147,9 +152,7 @@ def get_settings() -> Settings:
         llm_enabled=_flag("LLM_ENABLED", True),
         timeout_s=_int("LLM_TIMEOUT", 20),
         narrate=_flag("LLM_NARRATE", True),
-        embeddings_api_key=(
-            os.environ.get("EMBEDDINGS_API_KEY", "") or os.environ.get("GITHUB_TOKEN", "")
-        ).strip(),
+        embeddings_api_key=os.environ.get("EMBEDDINGS_API_KEY", "").strip(),
         embeddings_model=(
             os.environ.get("EMBEDDINGS_MODEL", DEFAULT_EMBEDDINGS_MODEL).strip()
             or DEFAULT_EMBEDDINGS_MODEL

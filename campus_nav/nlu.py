@@ -1,19 +1,20 @@
 """Turn a sentence into slots.
 
-Two parsers share one output type, and `parse` runs them in that order:
+Two parsers share one output type, and `parse` runs them in this order:
 
-  * `parse_with_grammar` -- deterministic regex rules. This is the primary path
-                          and the guaranteed one: the live demo can run with the
-                          network unplugged.
-  * `parse_with_llm`   -- asks the model for strict JSON, then validates it. Only
-                          consulted when the grammar finds nothing usable (no
-                          intent, or a route whose place words match nothing).
-                          Any failure (no key, timeout, bad JSON, invented place)
-                          returns None and the grammar result stands.
+  * `parse_with_llm`     -- asks the model for strict JSON, then validates it. This
+                           is the primary parser: it reads any phrasing, not only
+                           the sentence shapes somebody enumerated. Every failure
+                           -- no key, timeout, bad JSON, unknown intent, an
+                           endpoint the resolver cannot name -- returns None and
+                           the grammar answers instead.
+  * `parse_with_grammar` -- deterministic regex rules. The fallback: the mode the
+                           app runs in with no key and no network, and the safety
+                           net when a model turn is unusable.
 
-The LLM never decides a route and never invents a place id: unknown place text is
-kept as raw text and resolved against the place index (embeddings + Pinecone)
-afterwards. That is a deliberate architectural boundary, not a limitation.
+The LLM never decides a route and never invents a place: it reports what the user
+said, and `_validated()` accepts a place phrase only if the resolver recognises it.
+That boundary is enforced in code, not requested in a prompt.
 """
 from __future__ import annotations
 
@@ -32,7 +33,7 @@ INTENTS = (
     "route",          # find a way from A to B
     "distance",       # how far is A from B
     "close",          # this link or place is closed
-    "green_query",    # where can I recycle X / what bins are there
+
     "facility_query", # where is the nearest AED / toilet / water station / canteen
     "hours_query",    # is the canteen open now / what are the clinic's hours
     "reset",
@@ -154,7 +155,7 @@ def parse_with_llm(text: str, graph: CampusGraph, client: DeepSeekClient) -> Slo
         destination_text=as_id(payload.get("destination")),
         closed_text=closed_text,
         item=str(payload.get("item") or "").strip().lower(),
-        subject=text.strip() if intent in ("hours_query", "facility_query", "green_query") else "",
+        subject=text.strip() if intent in ("hours_query", "facility_query") else "",
         language=str(payload.get("language") or "en"),
         source="llm",
         raw=payload,
@@ -269,25 +270,6 @@ _DISTANCE_FOLLOWUP = re.compile(
     r"(?:有)?(?:多[遠远]|[幾几][遠远])", re.I,
 )
 
-_GREEN = re.compile(
-    r"\b(recycle|recycling|recyclables?|bin|dispose|disposal|throw|dump|"
-    r"battery|batteries|glass|plastic|paper|weee|electronic|canteen|food waste|"
-    r"water|refill|solar|green)\b",
-    re.I,
-)
-_ITEM = re.compile(
-    r"\b(batteries|battery|glass bottle|bottle|plastic|paper|cardboard|"
-    r"fluorescent|lamp|tube|weee|appliance|laptop|computer|phone|food waste|leftovers)\b",
-    re.I,
-)
-# Catch items we have never heard of, so the bot can say "I don't cover that"
-# instead of silently listing every facility it knows.
-_ITEM_UNKNOWN = re.compile(
-    r"\b(?:recycle|recycling|dispose\s+of|throw\s+away|throw|dump|bin|get\s+rid\s+of)\s+"
-    r"(?:my|this|that|these|the|an?|some|old|broken|used|unwanted)*\s*"
-    r"([a-z][a-z\-]{2,}(?:\s+[a-z][a-z\-]{2,})?)",
-    re.I,
-)
 # Opening-hours questions. Deliberately checked BEFORE the closure rule, because
 # "is the canteen closed on Sunday?" is a question about a timetable, not an
 # instruction to close a passage.
@@ -311,9 +293,6 @@ _ZH_SERVICES = {
     "clinic": r"[診诊]所|[醫医][務务]室", "bank": r"[銀银]行|ATM",
     "postbox": r"郵筒|邮筒|郵箱|邮箱", "bookstore": r"[書书]店|[書书]局",
     "lactation room": r"集乳室|哺乳室|母[嬰婴]室", "prayer room": r"祈[禱祷]室",
-    "recycling": r"回收[站點点箱桶]", "battery": r"[電电]池", "glass bottle": r"玻璃[樽瓶]",
-    "plastic": r"塑[料膠胶]", "paper": r"[紙纸](?:皮|張|张)?", "metal": r"金[屬属]|[鋁铝]罐",
-    "food waste": r"[廚厨][餘余]", "computer": r"[電电][腦脑]",
 }
 _ZH_SERVICE = re.compile("|".join(f"(?P<s{i}>{words})" for i, words in enumerate(_ZH_SERVICES.values())), re.I)
 _ZH_TIMETABLE = re.compile(
@@ -359,7 +338,7 @@ def _chinese_facility(text: str, places: PlaceResolver) -> Slots | None:
     explicit_route = names_destination(phrase, places)
     if explicit_route and not (_ZH_WHERE.search(phrase) and not _ZH_ROUTE_ACTION.search(phrase)):
         return None
-    if item and (_ZH_WHERE.search(phrase) or item == "recycling" or not explicit_route):
+    if item and (_ZH_WHERE.search(phrase) or not explicit_route):
         slots.intent = "facility_query"
         slots.facility_target = match.group()
         reference = (re.search(r"(?:距[離离]|[離离])\s*(.+?)\s*最近", place_words)
@@ -374,15 +353,8 @@ def _chinese_facility(text: str, places: PlaceResolver) -> Slots | None:
     if _ZH_OVERVIEW.search(phrase):
         slots.intent = "facility_query"
         return slots
-    unknown = (re.search(r"回收(?:我的|旧的|舊嘅)?([^？?，,。]+?)(?:[嗎吗呢呀啊]|$)", phrase)
-               or re.search(r"最近(?:的|嘅)?(.+?)(?:[喺在]?[哪邊边][里裡裏度儿]|在哪)", phrase)
-               or re.search(r"(?:附近|校[園园])有(?:冇|[沒没]有)?(.+?)(?:[嗎吗呢呀啊]|$)", phrase))
-    if unknown:
-        slots.intent = "facility_query"
-        slots.item = slots.facility_target = unknown.group(1)
-        return slots
     return None
-# "where is the nearest AED / toilet / water station" -- not a recyclable item
+# "where is the nearest AED / toilet / water station" -- a facility, not a place name
 # A sentence that names a physical link is talking about the map, not a timetable,
 # even when it contains the word "closed": "the link to Core D is closed" is an
 # instruction, while "is the canteen closed on Sunday" is a question about hours.
@@ -521,16 +493,8 @@ def parse_with_grammar(text: str, places: PlaceResolver) -> Slots:
 
     closed_text = lowered.strip() if _CLOSE.search(lowered) else ""
 
-    item = ""
-    mi = _ITEM.search(lowered)
-    if mi:
-        item = mi.group(1).lower()
-    else:
-        mu = _ITEM_UNKNOWN.search(lowered)
-        if mu:
-            item = mu.group(1).lower().strip()
-
     facility_hit = _FACILITY.search(lowered)
+    item = facility_hit.group(1).lower() if facility_hit else ""
     wants_hours = bool(_HOURS_EN.search(lowered) or _HOURS_ZH.search(lowered))
     # "the link to Core D is closed" and "the library is closed today" are reports
     # about the map; "is the canteen closed on Sunday?" and "what time does the
@@ -548,24 +512,17 @@ def parse_with_grammar(text: str, places: PlaceResolver) -> Slots:
     seeks_nearest = re.match(
         r"^(?:where|which|what|find|show|locate)\b.*?\b(?:closest|nearest)\b", lowered, re.I,
     )
-    asks_about_recycling = re.match(
-        r"^where (?:can|should|do) (?:i|we) (?:recycle|dispose|throw|dump)\b", lowered, re.I,
-    )
     if wants_hours and (not asks_for_route or asks_for_hours):
         intent = "hours_query"
         origin_text = destination_text = ""   # a timetable question is not a route
     elif closed_text and not wants_hours:
         intent = "close"
-    elif asks_about_recycling:
-        intent = "green_query"
     elif asks_for_route and not (facility_hit and seeks_nearest):
         intent = "distance" if _HOW_FAR.search(lowered) else "route"
-    elif facility_hit and not _ITEM.search(lowered):
+    elif facility_hit:
         intent = "facility_query"
     elif _FACILITY_ALL.search(lowered) and not (origin_text or destination_text):
         intent = "facility_query"   # no subject -> the overview reply lists what exists
-    elif item or (_GREEN.search(lowered) and not (origin_text or destination_text)):
-        intent = "green_query"
     elif _HOW_FAR.search(lowered):
         intent = "distance"
     elif origin_text or destination_text or avoid_stairs is not None:
@@ -575,8 +532,6 @@ def parse_with_grammar(text: str, places: PlaceResolver) -> Slots:
 
     subject = ""
     if intent in ("facility_query", "hours_query"):
-        if not item and facility_hit:
-            item = facility_hit.group(1).lower()
         subject = text.strip()   # the knowledge base searches the user's own words
 
     return Slots(
@@ -592,50 +547,50 @@ def parse_with_grammar(text: str, places: PlaceResolver) -> Slots:
     )
 
 
-def _grammar_understood(slots: Slots, places: PlaceResolver) -> bool:
-    """Whether the rules produced something worth trusting on their own.
+def _validated(slots: Slots, places: PlaceResolver) -> Slots | None:
+    """Accept a model parse only if the map can back it up.
 
-    A parse fails when the rules found no intent at all, or when they found a
-    route/distance request whose place words match nothing on the map -- that is
-    exactly the paraphrase the model can still rescue.
+    Two cheap checks. The intent must be one this dialogue layer implements
+    (parse_with_llm already filters that, so this is belt and braces). And every place
+    phrase the model reports must be one the resolver recognises: the model may report
+    what the user said, it may never create a place. An endpoint that resolves to
+    nothing is dropped, and a route left with no endpoint is refused outright so the
+    grammar gets its turn instead.
     """
-    if slots.intent == "out_of_scope":
-        return False
-    if slots.intent in ("route", "distance"):
-        phrases = [p for p in (slots.origin_text, slots.destination_text) if p]
-        if phrases and not any(places.resolve(p) for p in phrases):
-            return False
-    return True
+    if slots.intent not in INTENTS:
+        return None
+    for name in ("origin_text", "destination_text"):
+        phrase = getattr(slots, name)
+        if not phrase:
+            continue
+        if places.resolve(phrase):
+            continue
+        setattr(slots, name, "")            # an unnameable endpoint is not evidence
+        if slots.intent in ("route", "distance"):
+            return None
+    if slots.intent == "route" and not (slots.origin_text or slots.destination_text):
+        return None
+    return slots
 
 
 def parse(text: str, graph: CampusGraph, client: DeepSeekClient | None,
           places: PlaceResolver) -> Slots:
-    """Parse with the deterministic grammar first, asking the model only on failure."""
-    grammar = parse_with_grammar(text, places)
-    if _grammar_understood(grammar, places):
-        return grammar
+    """Ask the model first; fall back to the deterministic grammar.
 
-    route_text, avoid_stairs = stair_request(text)
-    if not route_text or client is None or not client.settings.llm_available:
-        return grammar
-
-    llm = parse_with_llm(route_text, graph, client)
-    if llm is None or llm.intent == "out_of_scope":
-        return grammar
-    llm.avoid_stairs = avoid_stairs
-
-    if grammar.intent in ("route", "distance"):
-        # The rules found the shape but not the place. Keep the user's wording as
-        # the authority on word order, and accept a model id only in the slot
-        # whose words actually resolve to that node in the index.
-        for name in ("origin_text", "destination_text"):
-            phrase = getattr(grammar, name)
-            node = graph.nodes.get(getattr(llm, name))
-            resolved = {hit.id for hit in places.resolve(phrase)} if phrase else set()
-            if node is not None and node.id in resolved:
-                setattr(grammar, name, getattr(llm, name))
-        if llm.intent in ("route", "distance"):
-            grammar.origin_text = grammar.origin_text or llm.origin_text
-            grammar.destination_text = grammar.destination_text or llm.destination_text
-        return grammar
-    return llm
+    The model is the parser whenever it is available, because it reads any phrasing and
+    not only the sentence shapes somebody enumerated. Its answer is validated by
+    _validated() before anything trusts it, and every failure path -- no key, timeout,
+    bad JSON, unknown intent, unnameable endpoint -- ends in the same place: the
+    grammar answers. A bad model turn therefore costs coverage, never correctness.
+    """
+    if client is not None and client.settings.llm_available:
+        route_text, avoid_stairs = stair_request(text)
+        candidate = parse_with_llm(route_text or text, graph, client)
+        if candidate is not None:
+            accepted = _validated(candidate, places)
+            if accepted is not None:
+                accepted.avoid_stairs = (
+                    avoid_stairs if avoid_stairs is not None else accepted.avoid_stairs
+                )
+                return accepted
+    return parse_with_grammar(text, places)

@@ -19,9 +19,11 @@ import urllib.request
 
 from .config import Settings
 
-# The embeddings endpoints cap the number of inputs per request (Azure-derived
-# gateways commonly cap at 16), so batches stay small even when indexing 192 names.
-BATCH_SIZE = 16
+# Endpoints cap the number of inputs per request, and the cap is not uniform: Alibaba
+# Cloud's text-embedding-v4 accepts 10 rows while its Qwen3 embedding models accept 20.
+# Ten is legal everywhere, and 284 names cost 29 requests instead of 18 -- irrelevant
+# next to being rejected by the one model somebody happens to configure.
+BATCH_SIZE = 10
 
 
 class EmbeddingError(RuntimeError):

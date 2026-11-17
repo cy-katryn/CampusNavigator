@@ -479,7 +479,12 @@ class App:
             "nodes": len(self.graph.nodes),
             "edges": len(self.graph.edges),
             "knowledge": self.knowledge.coverage(),
-            "places": {"index": self.index_info["index"], "vectors": self.index_info["vectors"]},
+            "places": {
+                "index": self.index_info["index"],
+                "vectors": self.index_info["vectors"],
+                "mode": self.index_info["mode"],
+                "warning": self.index_info["warning"],
+            },
             "footprints": len(self.footprints),
             "map_meta": {
                 k: self.graph.meta.get(k)
@@ -663,7 +668,9 @@ def serve(port: int = 8000, host: str = "127.0.0.1", open_browser: bool = False)
     try:
         app = App()
     except (PlaceIndexError, EmbeddingError, PineconeError) as exc:
-        print(f"place index unavailable: {exc}", file=sys.stderr)
+        # The place index itself never fails closed any more (it falls back to the
+        # lexical scorer), so reaching here means the app could not start at all.
+        print(f"startup failed: {exc}", file=sys.stderr)
         return 2
     Handler.app = app
     httpd = ThreadingHTTPServer((host, port), Handler)
@@ -673,7 +680,10 @@ def serve(port: int = 8000, host: str = "127.0.0.1", open_browser: bool = False)
     print(f"  map    : {app.graph.summary()}")
     print(f"  graph  : {rel(GRAPH_FILE)}")
     print(f"  parser : {app.settings.mode_label}")
-    print(f"  places : {app.index_info['index']} ({app.index_info['vectors']} vectors)")
+    mode = app.index_info["mode"]
+    detail = (f" ({app.index_info['index']}, {app.index_info['vectors']} vectors)"
+              if mode == "dense" else "")
+    print(f"  places : {mode}{detail}")
     print(f"  facts  : {app.knowledge.coverage()}")
     print(f"  open   : {url}")
     print("  ctrl-c to stop")

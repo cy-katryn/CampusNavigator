@@ -13,7 +13,7 @@ Why the file exists
 -------------------
 Those tables used to be copy-pasted into the graph builder and into
 `campus_nav/dialogue.py`. The copies drifted, one key was corrupted by a character
-encoding bug, and every recycling point silently dropped off the map. One table,
+encoding bug, and every place filed under it silently dropped off the map. One table,
 imported twice, cannot drift.
 
 The rule the tables obey
@@ -61,23 +61,9 @@ ROUTABLE_POI_CATEGORIES: frozenset[str] = frozenset({
 
 
 # ----------------------------------------------------------------- user wording
-# Everyday item wording -> canonical category. Tolerating plurals is handled by
-# canonical_category(); this table only has to list the base forms.
-ITEM_TO_CATEGORY: dict[str, str] = {
-    "battery": "battery", "batteries": "battery", "power bank": "battery",
-    "glass bottle": "glass_bottle", "bottle": "glass_bottle", "glass": "glass_bottle",
-    "plastic": "plastic", "plastic bottle": "plastic",
-    "paper": "paper", "cardboard": "paper",
-    "metal": "metal", "can": "metal", "tin": "metal",
-    "fluorescent": "lamp", "lamp": "lamp", "tube": "lamp", "bulb": "lamp",
-    "weee": "weee", "appliance": "weee", "air conditioner": "weee",
-    "laptop": "computer", "computer": "computer", "phone": "computer",
-    "food waste": "food_waste", "leftovers": "food_waste",
-}
-
-# Facility wording -> the capability it asks for. A capability is either one of the
-# canonical item categories above (a bin that accepts water_refill/toilet is odd,
-# but it keeps ONE lookup path for "which places offer X") or a service label.
+# Facility wording -> the capability it asks for. A capability is what the published
+# category guarantees (an accessible toilet, a water station, an AED), and it keeps
+# ONE lookup path for "which places offer X".
 FACILITY_WORDS: dict[str, str] = {
     "aed": "defibrillator", "defibrillators": "defibrillator",
     "defibrillator": "defibrillator", "heart starter": "defibrillator",
@@ -96,10 +82,8 @@ FACILITY_WORDS: dict[str, str] = {
 
 # Wording that means "a facility", not "the building it sits in".
 SERVICE_WORDS: tuple[str, ...] = (
-    "recycl", "bin", "battery", "batteries", "glass", "water", "refill",
-    "weee", "vending", "rvm", "food waste", "unire", "aed", "defibrillator",
-    "toilet", "washroom", "restroom", "canteen", "clinic", "postbox",
-    "lactation", "prayer", "atm",
+    "water", "refill", "aed", "defibrillator", "toilet", "washroom", "restroom",
+    "canteen", "clinic", "postbox", "lactation", "prayer", "atm",
 )
 
 
@@ -109,32 +93,9 @@ def label_key(text: str) -> str:
     The builder resolves a building label against the place names in the authored file,
     and the display layer resolves the same label again when it renders a card. Both
     call this, because a join key that differs by one space fails silently -- the same
-    way the UniRe key in this module's docstring once did.
+    way a corrupted key once did.
     """
     return " ".join((text or "").casefold().replace(".", " ").split())
-
-
-def canonical_category(raw: str) -> str:
-    """Map everyday item wording to a canonical category, tolerating plurals.
-
-    "glass bottles" -> "glass_bottle": try the phrase, then singular forms, then
-    the last noun ("bottles" -> "bottle").
-    """
-    text = (raw or "").strip().lower()
-    if not text:
-        return ""
-    candidates = [text, text.rstrip("s"), text.rstrip("es")]
-    if text.endswith("ies"):
-        candidates.append(text[:-3] + "y")
-    for cand in candidates:
-        if cand in ITEM_TO_CATEGORY:
-            return ITEM_TO_CATEGORY[cand]
-    words = text.split()
-    for word in reversed(words):
-        for cand in (word, word.rstrip("s"), word.rstrip("es")):
-            if cand in ITEM_TO_CATEGORY:
-                return ITEM_TO_CATEGORY[cand]
-    return text
 
 
 def facility_capability(word: str) -> str:
@@ -199,12 +160,8 @@ def feature_height(props: dict) -> float | None:
 
 
 def human_category(category: str) -> str:
-    """Canonical category -> the phrase used in a reply."""
+    """Canonical capability -> the phrase used in a reply."""
     return {
-        "glass_bottle": "glass bottles", "battery": "batteries",
-        "weee": "electrical and electronic equipment", "food_waste": "food waste",
         "water_refill": "drinking water", "toilet": "accessible toilets",
-        "defibrillator": "AEDs (defibrillators)", "paper": "paper",
-        "metal": "metal cans", "plastic": "plastics", "lamp": "fluorescent tubes",
-        "computer": "computers and phones",
+        "defibrillator": "AEDs (defibrillators)",
     }.get(category, category.replace("_", " "))

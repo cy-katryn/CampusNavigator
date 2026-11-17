@@ -3,7 +3,7 @@
 A domain-specific chatbot that finds accessible walking routes across the PolyU
 campus and points you at the facilities it carries.
 
-Package layout (deliberately flat so `python -m campus_nav.cli` just works):
+Package layout (deliberately flat so `python -m campus_nav.web` just works):
     config.py    environment + model settings, .env loading
     llm.py       DeepSeek client (stdlib urllib, retries, JSON extraction)
     graph.py     campus graph: load, validate, filter by access constraints
@@ -13,7 +13,6 @@ Package layout (deliberately flat so `python -m campus_nav.cli` just works):
     nlu.py       turns free text into slots -- LLM first, grammar fallback
     narrate.py   Level B: the model phrases the reply, the numbers stay computed
     dialogue.py  multi-turn state: follow-ups, constraints, facilities, hours
-    cli.py       interactive terminal client
     web.py       the web application (http.server + JSON API)
     static/      its HTML/CSS/JS: chat, SVG map, speech, avatar
 """

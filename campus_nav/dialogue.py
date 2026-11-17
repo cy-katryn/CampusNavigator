@@ -26,7 +26,6 @@ from .nlu import (REOPEN, Slots, names_destination, parse, parse_with_grammar,
 from .place_index import PlaceIndex
 from .places import (
     SERVICE_WORDS,
-    canonical_category,
     facility_capability,
     human_category,
 )
@@ -256,7 +255,7 @@ class Dialogue:
 
         if slots.facility_choice is not None:
             return self._facility_choice(slots)
-        if intent in ("green_query", "facility_query", "hours_query"):
+        if intent in ("facility_query", "hours_query"):
             reply = self._hours(slots) if intent == "hours_query" else self._facilities(slots)
             if reply.facility_result:
                 self.state.last_facilities = reply.facility_result
@@ -734,7 +733,6 @@ class Dialogue:
         words = [raw] if raw else []
         words += [w for w in SERVICE_WORDS if text and w in (text or "").lower()]
 
-        wanted_items = {canonical_category(w) for w in words if w}
         wanted_caps = {facility_capability(w) for w in words if w}
 
         matches: list[Node] = []
@@ -747,7 +745,7 @@ class Dialogue:
                 accessible = doc and str(doc.fields.get("toilet_for_disabled")).lower() in {"true", "1", "yes", "y"}
                 if node.name.lower().startswith("accessible toilet") or accessible:
                     matches.append(node)
-            elif wanted_items & set(node.accepts) or wanted_caps & set(node.accepts):
+            elif wanted_caps & set(node.accepts):
                 matches.append(node)
             elif (doc and (slots.language == "zh" or "defibrillator" in wanted_caps)
                   and raw == doc.fields.get("category", "").lower()):
@@ -856,7 +854,8 @@ class Dialogue:
         if reference:
             matching.sort(key=self.graph.node(reference).distance_to)
         cards = [self._card(n, reference) for n in matching[:5]]
-        label = human_category(canonical_category(raw)) if canonical_category(raw) else raw
+        capability = facility_capability(raw)
+        label = human_category(capability) if capability != raw else raw
         head = f"{len(matching)} place(s) for {label}:"
         lines = [head]
         for card in cards:
