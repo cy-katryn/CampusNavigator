@@ -54,7 +54,7 @@ from .config import (
     shapes_path,
 )
 from .dialogue import Dialogue, RouteClarification
-from .embeddings import EmbeddingClient, EmbeddingError
+from .embeddings import EmbeddingError
 from .facility_speech import facility_details, facility_summary, local_hours
 from .graph import CampusGraph
 from .kb import KnowledgeBase
@@ -62,7 +62,7 @@ from .landmarks import landmarks_along
 from .llm import DeepSeekClient
 from .local_names import building_name, floor_name, localize_label, place_name
 from .narrate import Narrator
-from .pinecone import PineconeError, PineconeStore
+from .pinecone import PineconeError
 from .place_index import PlaceIndex, PlaceIndexError
 from .places import feature_height, shape_kind
 from .speech import MAX_WAV_BYTES, LocalTranscriber, SpeechError

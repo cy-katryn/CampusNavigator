@@ -9,6 +9,10 @@ __pycache__/
 .venv/
 venv/
 .mypy_cache/
+# pytest writes its state into the rootdir, and a pytest-cache-files-* directory when
+# that fails. Neither belongs in the repository.
+.pytest_cache/
+pytest-cache-files-*/
 
 # --- runtime artefacts ---------------------------------------------------
 logs/

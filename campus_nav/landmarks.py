@@ -135,7 +135,3 @@ def landmarks_along(graph: CampusGraph, route, *, within_m: float = NEAR_M,
         })
     return chosen
 
-
-def landmark_names(landmarks: list[dict], limit: int = 3) -> list[str]:
-    """The first few names, for a sentence."""
-    return [item["name"] for item in landmarks[:limit]]

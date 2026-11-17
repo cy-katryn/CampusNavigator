@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from .config import RAW_DIR, get_settings
 from .facility_speech import FacilityResult, requested_day
 from .graph import CampusGraph, Node
-from .kb import KnowledgeBase, hours_summary, open_state, parse_slots, today_hours
+from .kb import KnowledgeBase, hours_summary, open_state, today_hours
 from .landmarks import landmarks_along
 from .llm import DeepSeekClient
 from .narrate import Facts, Narration, Narrator

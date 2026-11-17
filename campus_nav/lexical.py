@@ -52,6 +52,23 @@ STOPWORDS = frozenset({
 _BLOCK_WORDS = {"core", "block", "wing", "tower"}
 
 
+def drop_filler(text: str) -> str:
+    """The phrase with filler words removed, keeping the caller's capitalisation.
+
+    One implementation, because two did not agree: the parser's own cleaner kept "closed"
+    ("the library is closed" -> "library closed") while this list drops it, and that
+    disagreement is what made a closure sentence fail to resolve its own place.
+    """
+    words = [w for w in re.split(r"[\s,.?!;:]+", (text or "").strip()) if w]
+    kept: list[str] = []
+    for position, word in enumerate(words):
+        bare = word.strip(".,;:!?()[]{}\"'").lower()
+        if bare in STOPWORDS and not (position and words[position - 1].lower() in _BLOCK_WORDS):
+            continue
+        kept.append(word)
+    return " ".join(kept or words).strip()
+
+
 def normalise(text: str) -> list[str]:
     """"The words a phrase is about": lowercased, filler dropped, block letters kept.
 

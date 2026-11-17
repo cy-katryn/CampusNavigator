@@ -19,9 +19,10 @@ That boundary is enforced in code, not requested in a prompt.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
+from . import lexical
 from .graph import CampusGraph
 from .llm import DeepSeekClient
 
@@ -92,7 +93,6 @@ class Slots:
     subject: str = ""      # the raw words the question is *about* (hours/facility queries)
     language: str = "en"
     source: str = "grammar"
-    raw: dict = field(default_factory=dict)
     avoid_stairs: bool | None = None  # None keeps the current route preference
     facility_origin: str = ""
     facility_target: str = ""
@@ -207,7 +207,6 @@ def parse_with_llm(text: str, graph: CampusGraph, client: DeepSeekClient) -> Slo
         subject=text.strip() if intent in ("hours_query", "facility_query") else "",
         language=str(payload.get("language") or "en"),
         source="llm",
-        raw=payload,
     )
 
 
@@ -417,32 +416,20 @@ _FACILITY_ALL = re.compile(
     r"\b(facilit(?:y|ies)|amenities|what places|what can i find|what is here|"
     r"what's here|what is available|what services)\b", re.I)
 
-_FILLER = {
-    "the", "a", "an", "please", "now", "me", "campus", "polyu", "building",
-    "from", "to", "at", "in", "on", "is", "it", "that", "this",
-}
-
-
-
 def _clean_place(text: str) -> str:
-    """Drop filler words, but never the letter in a building name.
+    """Drop the verb and the filler, but never the letter in a building name.
 
     "a", "an", "the" are filler -- except in "Core A", "Block A", "Wing A", where the
     single letter IS the place. Stripping it turned "Core A" into "Core", which matches
     eight buildings and forces a disambiguation question, so no route was ever drawn.
+
+    The filler list itself lives in campus_nav/lexical.py: the resolver and the parser
+    have to agree on what a phrase is about, and when they each had their own list a
+    closure sentence resolved its place to nothing.
     """
     # "go to Block Y" -> "Block Y": a verb in front of the place is not part of its name
     text = re.sub(r"^(?:get|go|walk|head|take\s+me)\s+(?:to\s+)?", "", text.strip(), flags=re.I)
-    words = [w for w in re.split(r"[\s,.?!]+", text.strip()) if w]
-    kept = []
-    for index, word in enumerate(words):
-        if word.lower() in _FILLER:
-            previous = words[index - 1].lower() if index else ""
-            if previous in {"core", "block", "wing", "tower"}:
-                kept.append(word)          # "Core A" -- keep the A
-            continue
-        kept.append(word)
-    return " ".join(kept or words).strip()
+    return lexical.drop_filler(text)
 
 
 def refers_to_last_distance(text: str) -> bool:

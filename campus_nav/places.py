@@ -2,8 +2,8 @@
 
 This file answers three questions, in exactly one place:
 
-  1. which campus-map categories become routable places, and under what label?
-                                                   -> CAMPUS_SERVICES, ROUTABLE_POI_CATEGORIES
+  1. which campus-map category becomes which service label?
+                                                   -> CAMPUS_SERVICES
   2. how does a user's everyday wording ("toilets", "step-free", "water")
      map onto those canonical capabilities?        -> FACILITY_WORDS, SERVICE_WORDS
   3. what does a point accept, given the category it was published under?
@@ -51,14 +51,6 @@ CAMPUS_SERVICES: dict[str, tuple[str, tuple[str, ...]]] = {
     "Bookstore": ("Bookstore", ()),
     "Postbox": ("Postbox", ()),
 }
-
-# Which campus-map POI categories are allowed onto the routing graph at all.
-ROUTABLE_POI_CATEGORIES: frozenset[str] = frozenset({
-    "Building", "CoreLocation", "Canteen", "Toilet", "WaterStation",
-    "PublicTransport", "LectureTheatre", "Clinic", "AED", "LactationRoom",
-    "PrayerRoom", "Bank", "Bookstore", "Postbox",
-})
-
 
 # ----------------------------------------------------------------- user wording
 # Facility wording -> the capability it asks for. A capability is what the published
