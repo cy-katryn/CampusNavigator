@@ -1,7 +1,7 @@
 {
  "meta": {
   "title": "Campus routing graph, built from authored nodes and walkways",
-  "generated_at": "2026-11-17T03:46:53+0800",
+  "generated_at": "2026-11-17T18:45:25+0800",
   "inputs": [
    "data/authored/campus_pois.geojson",
    "data/authored/campus_paths.geojson"
@@ -11,7 +11,7 @@
   ],
   "real_data": [
    "walkway geometry: (c) OpenStreetMap contributors, ODbL, edited by us",
-   "place positions and names: PolyU campus map and GreenMap@PolyU"
+   "place positions and names: PolyU campus map"
   ],
   "derived": [
    "edge length = measured along the drawn walkway",

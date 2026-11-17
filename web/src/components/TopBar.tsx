@@ -86,17 +86,12 @@ export function TopBar({ status, engineOffline, onOpenSettings }: TopBarProps) {
             className="invisible absolute right-0 top-[calc(100%+10px)] z-40 w-[330px] -translate-y-1 rounded-xl border border-line bg-panel px-4 py-3.5 text-xs leading-relaxed text-ink opacity-0 shadow-2xl transition group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100"
           >
             <h3 className="mb-1.5 text-[13px] font-semibold">Where this data comes from</h3>
-            <p className="mb-2 text-muted">Scraped once from two official PolyU websites. </p>
+            <p className="mb-2 text-muted">Scraped once from the official PolyU campus map. </p>
             <ul className="mb-2 list-disc pl-4 text-ink">
               <li className="mb-1.5">
                 <b>Campus Map</b> — 561 POIs with waypoints and trilingual names
                 <br />
                 <span className="font-mono text-[11.5px] text-brand">polyu.edu.hk/campus-map</span>
-              </li>
-              <li className="mb-1.5">
-                <b>GreenMap@PolyU</b> — 315 recycling, water and green facilities
-                <br />
-                <span className="font-mono text-[11.5px] text-brand">polyu.edu.hk/greenmap</span>
               </li>
             </ul>
             <p className="mb-0 text-[11.5px] text-muted">

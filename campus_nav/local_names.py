@@ -34,12 +34,6 @@ _LABELS = {
     "Car Park Entrance": ("停車場入口", "停车场入口"), "Lift": ("升降機", "电梯"),
     "Toilet": ("洗手間", "洗手间"), "Water Station": ("飲水機", "饮水机"),
     "Security Office": ("保安室", "保安室"), "Flagpole": ("旗桿", "旗杆"),
-    "Canteen food waste": ("飯堂廚餘收集點", "食堂厨余收集点"),
-    "Pantry food waste": ("茶水間廚餘收集點", "茶水间厨余收集点"),
-    "Glass bottle recycling": ("玻璃樽回收點", "玻璃瓶回收点"),
-    "Battery recycling": ("充電池回收點", "充电电池回收点"),
-    "Reverse vending": ("智能飲品膠樽回收機", "饮料瓶回收机"),
-    "UniRe recycling": ("UniRe 回收點", "UniRe 回收点"),
     "Food and Snacks": ("食品及小食", "食品及小吃"),
     "Canteen": ("飯堂", "食堂"), "Student Canteen": ("學生飯堂", "学生食堂"),
     "Café": ("咖啡店", "咖啡店"), "Kiosk": ("小食亭", "小吃亭"),
@@ -117,8 +111,8 @@ def building_name(graph: CampusGraph, label: str, lang: str) -> str:
     if declared:
         return declared[idx]
 
-    # GreenMap uses literal addresses such as "Outside Core B" and building
-    # codes in brackets. Its graph parent can refer to a different building.
+    # The campus map publishes literal addresses such as "Outside Core B" and
+    # building codes in brackets. The graph parent can refer to a different one.
     if "/" in label:
         return "／".join(building_name(graph, part.strip(), lang) for part in label.split("/"))
     if label.startswith("Outside "):
@@ -150,16 +144,6 @@ def place_name(graph: CampusGraph, node_id: str, lang: str) -> str:
     written = (node.name_zh, node.name_zh_cn)[idx]
     if written and _HAN.search(written):
         return written
-
-    # GreenMap names a facility by its literal address ("UniRe recycling · Core H"),
-    # not by a place name, so it is assembled from the parts. No GreenMap point is in
-    # the graph today; this stays because the source is only switched off, not gone.
-    if node.source == "greenmap":
-        parts = label.split(" · ")
-        if len(parts) >= 2 and parts[0] in _LABELS:
-            location = building_name(graph, parts[1], lang)
-            floor = floor_name(parts[2], lang) if len(parts) > 2 else ""
-            return f"{location}{floor}的{_LABELS[parts[0]][idx]}"
 
     qualified = _PARENS.fullmatch(label)
     if qualified and qualified[1] in _LABELS:

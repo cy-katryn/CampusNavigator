@@ -42,7 +42,7 @@ def document_text(node: Node) -> str:
 
     Both scripts and the block code are included because a user may type any of them;
     the category and service words give the vector something to match a paraphrase
-    against ("recycling point" -> "Rechargeable Battery Collection").
+    against ("somewhere to fill a bottle" -> "Water Station").
     """
     parts = [node.name]
     for name in (node.name_zh, node.name_zh_cn):

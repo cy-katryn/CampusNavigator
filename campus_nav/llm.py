@@ -154,12 +154,3 @@ class DeepSeekClient:
             latency_ms=int((time.monotonic() - started) * 1000),
             attempts=retries,
         )
-
-    # -- convenience -------------------------------------------------------
-    def health(self) -> LLMResult:
-        """One tiny round-trip so you can confirm the key and model work."""
-        return self.chat(
-            [{"role": "user", "content": "Reply with exactly this JSON: {\"ok\": true}"}],
-            max_tokens=30,
-            retries=2,
-        )

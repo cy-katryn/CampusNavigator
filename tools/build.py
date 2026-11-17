@@ -28,10 +28,7 @@ from campus_nav.config import (  # noqa: E402
 from campus_nav.graph import CampusGraph, haversine_m  # noqa: E402
 from campus_nav.places import (  # noqa: E402
     CAMPUS_SERVICES,
-    GREEN_ACCEPTS,
-    feature_height,
     label_key,
-    shape_kind,
 )
 
 HKT = timezone(timedelta(hours=8))
@@ -117,8 +114,6 @@ def accepts_for(service: str) -> list[str]:
     Accepts either the published category ("Toilet") or the label we print
     ("Accessible Toilet"), because an OSM-derived node only has the label.
     """
-    if service in GREEN_ACCEPTS:
-        return list(GREEN_ACCEPTS[service])
     if service in CAMPUS_SERVICES:
         return list(CAMPUS_SERVICES[service][1])
     for label, accepts in CAMPUS_SERVICES.values():
@@ -209,58 +204,9 @@ def place_from_feature(feature: dict) -> dict:
     }
 
 
-def structure_index(building_features: list[dict]) -> list[dict]:
-    """Every polygon, and the anchor place it will become.
-
-    The polygon is what the map extrudes. The anchor is the point a route ends at,
-    and -- for anything standing inside the polygon -- the parent.
-    """
-    structures: list[dict] = []
-    used: set[str] = set()
-    for feature in building_features:
-        geometry = feature.get("geometry") or {}
-        props = dict(feature.get("properties") or {})
-        if geometry.get("type") != "Polygon":
-            continue
-        ring = (geometry.get("coordinates") or [[]])[0]
-        if len(ring) < 3:
-            continue
-        kind = shape_kind(props)
-        name = osm_name(props)
-        # A polygon can be drawn without being a destination. "routable": "no" is this
-        # project's own switch (not an OSM tag): the block still appears on the map,
-        # but nothing can be asked to route to it. It is what makes building parts,
-        # which describe the volume and not the entrance, safe to keep.
-        routable = str(props.get("routable") or "").strip().lower() not in {
-            "no", "false", "0", "n",
-        }
-        base = slug(name) if name else "B" + slug(str(props.get("id") or ""))[:16]
-        node_id, n = base, 2
-        while node_id in used:
-            node_id = f"{base}_{n}"
-            n += 1
-        used.add(node_id)
-        structures.append({
-            "id": node_id,
-            "name": name,
-            "kind": kind,
-            "routable": routable,
-            "props": props,
-            "ring": ring,
-            "lat": round(sum(point[1] for point in ring) / len(ring), 6),
-            "lng": round(sum(point[0] for point in ring) / len(ring), 6),
-        })
-    return structures
-
-
-def slug(name: str) -> str:
-    text = re.sub(r"[^A-Za-z0-9]+", "_", name or "").strip("_").upper()
-    return text or "NODE"
-
-
 def is_decor(props: dict) -> bool:
     # An authored place says what it is: "kind" / "service" is a decision already made
-    # in the file, and nothing here may overrule it. Without this, every GreenMap point
+    # in the file, and nothing here may overrule it. Without this, every point that
     # looks like furniture because its properties are the app's vocabulary rather than
     # raw OSM tags.
     if props.get("kind") or props.get("service"):
@@ -323,16 +269,6 @@ def read_node_features() -> list[dict]:
     for path in present:
         features.extend(read_authored(path, "Point"))
     return features
-
-
-def read_building_features() -> list[dict]:
-    if not SHAPES_FILE.exists():
-        raise SystemExit(
-            f"missing {rel(SHAPES_FILE)}\n"
-            "  this is the structures file: the polygons the map extrudes, and the"
-            "\n  places routes can end at"
-        )
-    return read_authored(SHAPES_FILE, "Polygon")
 
 
 def vertex_key(lat: float, lng: float) -> tuple[float, float]:
@@ -634,7 +570,7 @@ def build_graph(node_features: list[dict], path_features: list[dict],
             "inputs_drawn_only": [rel(SHAPES_FILE)],
             "real_data": [
                 "walkway geometry: (c) OpenStreetMap contributors, ODbL, edited by us",
-                "place positions and names: PolyU campus map and GreenMap@PolyU",
+                "place positions and names: PolyU campus map",
             ],
             "derived": [
                 "edge length = measured along the drawn walkway",

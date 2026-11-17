@@ -5,7 +5,7 @@ What problem this solves
 The route planner answers "how do I get to X" from the graph. It cannot answer
 "is the canteen open now" or "which floor is the clinic on", and a language model
 asked those questions unaided will happily invent an answer. So the facts live
-here, in documents built from the two official sources, and the reply is assembled
+here, in documents built from the published campus-map records, and the reply is assembled
 from the documents that were actually retrieved.
 
 The pipeline, in order (this is the "RAG" part, and it is worth drawing on a slide):
@@ -31,8 +31,8 @@ domain bot and a confident liar:
 
 Retrieval is BM25 (the ranking function from the IR literature, implemented in
 about 40 lines of standard library). It is lexical, not a neural embedding index,
-and that is a defensible choice for a closed vocabulary: the sources are under 900
-short documents, and BM25 never needs a model download, a vector store or a
+and that is a defensible choice for a closed vocabulary: the source is 561 short
+documents, and BM25 never needs a model download, a vector store or a
 network call, so the demo works with the Wi-Fi off.
 """
 from __future__ import annotations
@@ -83,10 +83,10 @@ class Doc:
     """One retrievable unit: a place, or a green facility."""
 
     id: str
-    kind: str                    # "place" | "green"
+    kind: str                    # "place"
     title: str
     text: str                    # the searchable surface
-    source: str                  # "campus-map" | "greenmap"
+    source: str                  # "campus-map"
     ref: str                     # the source record id
     fields: dict = field(default_factory=dict)
     node_id: str = ""            # matching graph node, when the place is routable
@@ -264,37 +264,6 @@ class KnowledgeBase:
                     )
                 )
 
-        green_path = raw / "green_facilities.json"
-        if green_path.exists():
-            for rec in json.loads(green_path.read_text(encoding="utf-8"))["records"]:
-                title = f"{rec.get('type', '')} - {rec.get('name', '')}".strip(" -")
-                text = " ".join(
-                    part for part in (
-                        rec.get("name", ""), rec.get("type", ""), rec.get("address", ""),
-                        rec.get("building", ""), rec.get("description", ""),
-                        rec.get("department", ""), rec.get("campus", ""),
-                    ) if part
-                )
-                docs.append(
-                    Doc(
-                        id=f"green:{rec.get('uid', '')}",
-                        kind="green",
-                        title=title,
-                        text=text,
-                        source="greenmap",
-                        ref=str(rec.get("uid", "")),
-                        fields={
-                            "category": rec.get("type", ""),
-                            "address": rec.get("address", ""),
-                            "building": rec.get("building", ""),
-                            "campus": rec.get("campus", ""),
-                            "description": rec.get("description", ""),
-                            "lat": rec.get("lat"),
-                            "lng": rec.get("lng"),
-                        },
-                        node_id=node_by_ref.get(str(rec.get("uid", "")), ""),
-                    )
-                )
         return cls(docs)
 
     # -- retrieval ---------------------------------------------------------

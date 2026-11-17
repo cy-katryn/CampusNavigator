@@ -20,7 +20,7 @@ import type {
 
 const GREETING =
   'Hi! I am PolyU Campus Navigator Chatbot. I am here to help you navigate the PolyU. ' +
-  'Whether you need walking directions, green facilities, or essential amenities, I have your back! ';
+  'Whether you need walking directions or an essential amenity, I have your back! ';
 
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null);

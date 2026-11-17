@@ -300,9 +300,9 @@ class Dialogue:
 
         return Reply(
             "I can find walking routes on the PolyU campus, point you to facilities "
-            "(AEDs, water, accessible toilets, recycling) and quote their opening hours. "
+            "(AEDs, water, accessible toilets, canteens) and quote their opening hours. "
             "Try: \"how do I get from the entrance to the library?\" or "
-            "\"where can I recycle batteries?\"",
+            "\"where is the nearest AED?\"",
             slots=slots,
         )
 
@@ -312,7 +312,7 @@ class Dialogue:
             "I can do three things:\n"
             "  1. Route between campus places, e.g. \"from the entrance to the library\"\n"
             "  2. Re-plan around closures: \"the link between Core C and Core D is closed\"\n"
-            "  3. Find facilities and their opening hours: \"where do I recycle glass bottles?\"\n"
+            "  3. Find facilities and their opening hours: \"is the canteen open?\"\n"
             "Ask in English or Chinese. If I do not know something, I will say so.",
             notes=[f"graph: {self.graph.summary()}"],
         )
@@ -747,9 +747,6 @@ class Dialogue:
                 accessible = doc and str(doc.fields.get("toilet_for_disabled")).lower() in {"true", "1", "yes", "y"}
                 if node.name.lower().startswith("accessible toilet") or accessible:
                     matches.append(node)
-            elif raw == "recycling" and slots.language == "zh":
-                if node.source == "greenmap":
-                    matches.append(node)
             elif wanted_items & set(node.accepts) or wanted_caps & set(node.accepts):
                 matches.append(node)
             elif (doc and (slots.language == "zh" or "defibrillator" in wanted_caps)
@@ -821,7 +818,7 @@ class Dialogue:
         }
 
     def _facilities(self, slots: Slots) -> Reply:
-        """'where do I recycle glass', 'where is the nearest AED', 'what is there'."""
+        """'where is the nearest AED', 'where is the water station', 'what is there'."""
         raw = (slots.item or "").strip().lower()
         wants_service = any(w in raw for w in SERVICE_WORDS) or bool(facility_capability(raw) != raw)
 
@@ -835,7 +832,7 @@ class Dialogue:
             for name, count in sorted(counts.items(), key=lambda kv: -kv[1]):
                 lines.append(f"  - {name} ({count})")
             lines.append(
-                'Ask with an item or a facility, e.g. "where do I recycle batteries?", '
+                'Ask about a facility, e.g. "where is the nearest AED?", '
                 '"where is the nearest AED?", "is the canteen open?".')
             return Reply("\n".join(lines), slots=slots, facility_result=FacilityResult("overview", counts=counts))
 
@@ -1143,13 +1140,13 @@ class Dialogue:
         known = sorted({a for n in self.graph.nodes.values() for a in n.accepts})
         if known:
             lines.append(
-                "What I do cover: walking routes between campus places, and these green "
-                f"facilities: {', '.join(human_category(k) for k in known)}."
+                "What I do cover: walking routes between campus places, and the facilities "
+                f"the map does carry: {', '.join(human_category(k) for k in known)}."
             )
         if documents:
             lines.append(
-                f"My knowledge base holds {documents} records from the PolyU campus map and "
-                f"GreenMap, but only {with_hours} of them publish opening hours."
+                f"My knowledge base holds {documents} records from the PolyU campus map, "
+                f"but only {with_hours} of them publish opening hours."
             )
         lines.append("I would rather say so than invent an answer.")
         return Reply("\n".join(lines))

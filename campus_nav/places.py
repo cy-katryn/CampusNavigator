@@ -2,42 +2,28 @@
 
 This file answers three questions, in exactly one place:
 
-  1. which GreenMap categories become routable places, and what is each one
-     allowed to claim it accepts?                  -> GREEN_ACCEPTS
-  2. which campus-map categories become routable places, and under what label?
+  1. which campus-map categories become routable places, and under what label?
                                                    -> CAMPUS_SERVICES, ROUTABLE_POI_CATEGORIES
-  3. how does a user's everyday wording ("glass bottles", "e-waste", "step-free")
-     map onto those canonical categories?          -> ITEM_TO_CATEGORY, canonical_category
+  2. how does a user's everyday wording ("toilets", "step-free", "water")
+     map onto those canonical capabilities?        -> FACILITY_WORDS, SERVICE_WORDS
+  3. what does a point accept, given the category it was published under?
+                                                   -> CAMPUS_SERVICES
 
 Why the file exists
 -------------------
-Those tables used to be copy-pasted into `experiments/build_provisional_graph.py`
-and `campus_nav/dialogue.py`. The copies drifted: the pipeline's key was corrupted
-to "UniReÂ©" while the dialogue's was "UniReÂ©", so the match failed and **all 28
-UniRe recycling points were silently dropped from the map**. One table, imported
-twice, cannot drift.
+Those tables used to be copy-pasted into the graph builder and into
+`campus_nav/dialogue.py`. The copies drifted, one key was corrupted by a character
+encoding bug, and every recycling point silently dropped off the map. One table,
+imported twice, cannot drift.
 
 The rule the tables obey
 ------------------------
-Only what the published category name guarantees. "Glass Bottle Collection" accepts
-glass bottles; it does not imply it accepts plastic. Anything not listed stays
-unknown, and the knowledge base is required to say so.
+Only what the published category name guarantees. A published "Toilet" is an
+accessible toilet only where the record says so; nothing is inferred from a name
+that does not claim it. Anything not listed stays unknown, and the knowledge base is
+required to say so.
 """
 from __future__ import annotations
-
-# --------------------------------------------------------------------- GreenMap
-# GreenMap category -> the canonical item categories it accepts. Only what the
-# category name itself guarantees; nothing inferred.
-GREEN_ACCEPTS: dict[str, tuple[str, ...]] = {
-    "Recyclables Collection": ("paper", "metal", "plastic"),
-    "UniRe© (University / Universal Recycling Facilities)": ("paper", "metal", "plastic"),
-    "Glass Bottle Collection": ("glass_bottle",),
-    "Rechargeable Battery Collection": ("battery",),
-    "Waste Electrical and Electronic Equipment Collection": ("weee",),
-    "Reverse Vending Machine": ("plastic", "metal"),
-    "Canteen Food Waste Collection": ("food_waste",),
-    "Pantry Food Waste Collection": ("food_waste",),
-}
 
 # ------------------------------------------------------------------- campus map
 # Campus-map category -> (label the bot uses, canonical capabilities).

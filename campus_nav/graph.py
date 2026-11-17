@@ -60,10 +60,10 @@ class Node:
     name_zh: str = ""            # the Chinese name in traditional characters
     name_zh_cn: str = ""         # the same name in simplified characters
     parent: str = ""             # the building this thing stands inside, if any
-    service: str = ""            # e.g. "Rechargeable Battery Collection"
-    accepts: tuple[str, ...] = ()  # canonical item categories this point accepts
-    source: str = ""             # "campus-map" | "greenmap" -- provenance of the place
-    ref: str = ""                # that source's own record id (poi_id / uid)
+    service: str = ""            # e.g. "Accessible Toilet"
+    accepts: tuple[str, ...] = ()  # canonical capabilities this point accepts
+    source: str = ""             # "campus-map" -- provenance of the place
+    ref: str = ""                # that source's own record id (poi_id)
 
     def distance_to(self, other: "Node") -> float:
         return haversine_m(self.lat, self.lng, other.lat, other.lng)

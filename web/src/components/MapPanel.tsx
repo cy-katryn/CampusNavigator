@@ -197,7 +197,7 @@ export function MapPanel(props: MapPanelProps) {
         </div>
 
         <footer className="absolute bottom-2 right-3 text-right text-[10.5px] text-muted">
-          Basemap © OpenStreetMap contributors · Places: PolyU Campus Map &amp; GreenMap@PolyU
+          Basemap © OpenStreetMap contributors · Places: PolyU Campus Map
         </footer>
       </div>
     </section>

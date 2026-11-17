@@ -3,7 +3,7 @@
 **COMP4431 Artificial Intelligence (2026/27) — Group Project · Group 21**
 
 A chatbot that finds walking routes across the PolyU campus, points you at the facilities
-you need — recycling points, AEDs, water stations, accessible toilets, canteens, clinics,
+you need — AEDs, water stations, accessible toilets, canteens, clinics,
 faculty offices — and quotes their published opening hours, or says plainly that it does not
 know. Ask in English or Chinese; the answer is spoken aloud and the route draws itself on a
 2.5D campus map.
@@ -121,22 +121,18 @@ model paths before starting the server.
 
 ## Data
 
-Four authored inputs, one generated file the app reads:
+Three authored inputs, one generated file the app reads:
 
 | File | Holds |
 |---|---|
 | `data/authored/campus_buildings.geojson` | the structure polygons — the 2.5D map |
 | `data/authored/campus_paths.geojson`  | the walkways, one LineString per stretch |
 | `data/authored/campus_pois.geojson`   | every POI the PolyU campus map publishes |
-| `data/authored/green_nodes.geojson`   | the GreenMap@PolyU recycling points (not included) |
 | `data/processed_data/campus_graph.json` | **generated** — the only file the app reads |
 
 ```bash
 python tools/build.py graph          # rebuild after editing any GeoJSON
 python tools/build.py embed          # embed every place name into Pinecone
-python tools/build.py gaps           # where the walkway network does not join up
-python tools/build.py audit          # what is wrong with the structures file
-python tools/build.py names          # place names that will read badly
 ```
 
 `tools/build.py` is deterministic arithmetic on what you drew. It measures along your lines,
@@ -151,8 +147,8 @@ than inventing a route. To change the map: edit a GeoJSON in `data/authored/`, r
 | `campus_nav/` | the application: graph, A*/UCS search, dialogue, NLU, knowledge base, place index (embeddings + Pinecone), web server |
 | `web/` | the interface source: React 18 + TypeScript, styled with Tailwind, icons from Lucide, built by Vite |
 | `campus_nav/static/` | **generated** — the built interface the server serves |
-| `tools/build.py` | build, embed, audit, gaps, name report |
-| `data/raw_data/` | what Overpass and the PolyU sites published, untouched |
+| `tools/build.py` | build the graph, embed the place names |
+| `data/raw_data/` | the scraped JSON file the knowledge base reads |
 | `data/authored/` | the GeoJSON you draw and edit |
 
 ## Known limitations
@@ -172,6 +168,6 @@ than inventing a route. To change the map: edit a GeoJSON in `data/authored/`, r
 ## Attribution
 
 - Walkway geometry: © OpenStreetMap contributors, ODbL.
-- Place names, positions and opening hours: the PolyU campus map and GreenMap@PolyU.
+- Place names, positions and opening hours: the PolyU campus map.
 - Building outlines derived from the same OpenStreetMap data, edited for this project.
 

@@ -29,7 +29,6 @@ AUTHORED_DIR = DATA_DIR / "authored"
 PROCESSED_DIR = DATA_DIR / "processed_data"
 ENV_PATH = PROJECT_ROOT / ".env"
 
-GREEN_NODES_FILE = AUTHORED_DIR / "green_nodes.geojson"  # Points: GreenMap recycling / food waste
 NODES_FILE = AUTHORED_DIR / "campus_pois.geojson"  # Points: PolyU campus-map amenities
 SHAPES_FILE = AUTHORED_DIR / "campus_buildings.geojson"  # Polygons: the structures
 PATHS_FILE = AUTHORED_DIR / "campus_paths.geojson"    # Lines: the walkways you drew

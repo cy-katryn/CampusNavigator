@@ -50,9 +50,6 @@ class RouteResult:
     explain: list[dict] = field(default_factory=list)
     blocking: dict = field(default_factory=dict)
 
-    def path_names(self, graph: CampusGraph) -> list[str]:
-        return [graph.node(n).name for n in self.path]
-
 
 def _reconstruct(parent: dict[str, tuple[str, Edge]], start: str, goal: str) -> list[tuple[str, Edge]]:
     steps: list[tuple[str, Edge]] = []

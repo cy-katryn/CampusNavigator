@@ -32,7 +32,7 @@ INTENTS = (
     "route",          # find a way from A to B
     "distance",       # how far is A from B
     "close",          # this link or place is closed
-    "green_query",    # where can I recycle X / what green facilities are there
+    "green_query",    # where can I recycle X / what bins are there
     "facility_query", # where is the nearest AED / toilet / water station / canteen
     "hours_query",    # is the canteen open now / what are the clinic's hours
     "reset",
@@ -89,8 +89,8 @@ def _place_catalogue(graph: CampusGraph, limit: int = 90) -> str:
     """The places the model is shown, in the order it is most likely to need them.
 
     Every building is listed, plus ONE representative of each service type: 192 nodes
-    would blow the prompt budget, and the model does not need the id of a particular
-    recycling bin to understand "where can I recycle batteries".
+    would blow the prompt budget, and the model does not need the id of one particular
+    water station to understand "where can I fill my bottle".
     """
     buildings = [
         n for n in graph.nodes.values()
