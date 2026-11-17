@@ -5,7 +5,7 @@ campus and points you at its green facilities.
 
 Package layout (deliberately flat so `python -m campus_nav.cli` just works):
     config.py    environment + model settings, .env loading
-    llm.py       OpenRouter client (stdlib urllib, retries, JSON extraction)
+    llm.py       DeepSeek client (stdlib urllib, retries, JSON extraction)
     graph.py     campus graph: load, validate, filter by access constraints
     search.py    A* and Uniform-Cost Search with comparable statistics
     places.py    the one vocabulary shared by the data pipeline and the dialogue

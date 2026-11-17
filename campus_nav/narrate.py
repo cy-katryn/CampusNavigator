@@ -30,7 +30,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from .llm import LLMResult, OpenRouterClient
+from .llm import LLMResult, DeepSeekClient
 
 NUMBER = re.compile(r"\d+(?:\.\d+)?")
 
@@ -138,7 +138,7 @@ def grounded_numbers(reply: str, allowed: set[float], tolerance: float = 1.0) ->
 class Narrator:
     """Turns a computed route into a sentence. Falls back silently on any problem."""
 
-    def __init__(self, client: OpenRouterClient | None, max_tokens: int = 160) -> None:
+    def __init__(self, client: DeepSeekClient | None, max_tokens: int = 160) -> None:
         self.client = client
         self.max_tokens = max_tokens
 

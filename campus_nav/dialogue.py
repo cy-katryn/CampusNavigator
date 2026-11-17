@@ -19,7 +19,7 @@ from .config import RAW_DIR
 from .facility_speech import FacilityResult, requested_day
 from .graph import STOPWORDS, CampusGraph, Node
 from .kb import KnowledgeBase, hours_summary, open_state, parse_slots, today_hours
-from .llm import OpenRouterClient
+from .llm import DeepSeekClient
 from .narrate import Facts, Narration, Narrator
 from .nlu import (REOPEN, Slots, map_spelling, names_destination, parse, parse_with_grammar,
                   refers_to_last_distance, stair_request)
@@ -154,7 +154,7 @@ _STEP_FREE = re.compile(
 
 
 class Dialogue:
-    def __init__(self, graph: CampusGraph, client: OpenRouterClient | None = None,
+    def __init__(self, graph: CampusGraph, client: DeepSeekClient | None = None,
                  narrator: Narrator | None = None,
                  knowledge: KnowledgeBase | None = None) -> None:
         self.graph = graph

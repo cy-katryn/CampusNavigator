@@ -36,7 +36,7 @@ PATHS_FILE = AUTHORED_DIR / "campus_paths.geojson"    # Lines: the walkways you 
 
 GRAPH_FILE = PROCESSED_DIR / "campus_graph.json"
 
-DEFAULT_MODEL = "google/gemma-4-26b-a4b-it:free"
+DEFAULT_MODEL = "deepseek-chat"
 
 
 def rel(path: Path) -> str:
@@ -84,11 +84,10 @@ def _int(name: str, default: int) -> int:
 class Settings:
     api_key: str
     model: str
-    app_name: str
     llm_enabled: bool
     timeout_s: int
     narrate: bool = True
-    base_url: str = "https://openrouter.ai/api/v1"
+    base_url: str = "https://api.deepseek.com/v1"
 
     @property
     def llm_available(self) -> bool:
@@ -112,9 +111,8 @@ class Settings:
 def get_settings() -> Settings:
     load_env()
     return Settings(
-        api_key=os.environ.get("OPENROUTER_API_KEY", "").strip(),
-        model=os.environ.get("OPENROUTER_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL,
-        app_name=os.environ.get("OPENROUTER_APP_NAME", "COMP4431-Group21").strip(),
+        api_key=os.environ.get("DEEPSEEK_API_KEY", "").strip(),
+        model=os.environ.get("DEEPSEEK_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL,
         llm_enabled=_flag("LLM_ENABLED", True),
         timeout_s=_int("LLM_TIMEOUT", 20),
         narrate=_flag("LLM_NARRATE", True),

@@ -87,13 +87,13 @@ export function SettingsDialog({ open, status, onClose, onSaved }: SettingsDialo
         </p>
 
         <label className="mb-3 block">
-          <span className="mb-1 block text-[11.5px] text-muted">OpenRouter API key</span>
+          <span className="mb-1 block text-[11.5px] text-muted">DeepSeek API key</span>
           <input
             ref={keyField}
             type="password"
             autoComplete="off"
             spellCheck={false}
-            placeholder="sk-or-v1-… (leave blank to keep the current one)"
+            placeholder="sk-… (leave blank to keep the current one)"
             value={key}
             onChange={(event) => setKey(event.target.value)}
             onKeyDown={(event) => {
@@ -109,7 +109,7 @@ export function SettingsDialog({ open, status, onClose, onSaved }: SettingsDialo
             type="text"
             autoComplete="off"
             spellCheck={false}
-            placeholder="google/gemma-4-26b-a4b-it:free"
+            placeholder="deepseek-chat"
             value={model}
             onChange={(event) => setModel(event.target.value)}
             className={FIELD_INPUT}

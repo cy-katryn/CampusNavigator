@@ -1,14 +1,14 @@
-"""OpenRouter chat client -- standard library only.
+"""DeepSeek chat client -- standard library only.
 
-Why no `openai` package: OpenRouter speaks the OpenAI-compatible protocol, so a
+Why no `openai` package: DeepSeek speaks the OpenAI-compatible protocol, so a
 single urllib POST is enough. Fewer dependencies means the demo runs on any
 machine without a network install step.
 
 Design notes that matter for the report
 ---------------------------------------
-* Gemma models on OpenRouter have **no native tool-calling**, so we ask for JSON
-  in the prompt and parse it defensively (`extract_json`).
-* Free tiers rate-limit aggressively, so 429/5xx are retried with exponential
+* We ask for JSON in the prompt and parse it defensively (`extract_json`)
+  rather than relying on native tool-calling.
+* The API rate-limits under load, so 429/5xx are retried with exponential
   backoff, and every failure is returned as a `LLMResult(ok=False)` instead of
   raising -- the dialogue layer always has a grammar fallback to fall back to.
 * Nothing here ever routes or answers a factual question. The model's only job is
@@ -81,7 +81,7 @@ def extract_json(text: str) -> dict | None:
     return None
 
 
-class OpenRouterClient:
+class DeepSeekClient:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
@@ -95,7 +95,7 @@ class OpenRouterClient:
         retries: int = 3,
     ) -> LLMResult:
         if not self.settings.llm_available:
-            return LLMResult(ok=False, error="LLM disabled or no OPENROUTER_API_KEY set")
+            return LLMResult(ok=False, error="LLM disabled or no DEEPSEEK_API_KEY set")
 
         url = f"{self.settings.base_url}/chat/completions"
         payload = {
@@ -107,9 +107,6 @@ class OpenRouterClient:
         headers = {
             "Authorization": f"Bearer {self.settings.api_key}",
             "Content-Type": "application/json",
-            # OpenRouter uses these two for attribution on your dashboard.
-            "HTTP-Referer": "https://www.polyu.edu.hk",
-            "X-Title": self.settings.app_name,
         }
 
         started = time.monotonic()

@@ -56,7 +56,7 @@ from .dialogue import Dialogue, RouteClarification
 from .facility_speech import facility_details, facility_summary, local_hours
 from .graph import CampusGraph
 from .kb import KnowledgeBase
-from .llm import OpenRouterClient
+from .llm import DeepSeekClient
 from .local_names import building_name, floor_name, localize_label, place_name
 from .narrate import Narrator
 from .places import feature_height, shape_kind
@@ -435,7 +435,7 @@ class App:
         self.graph = CampusGraph.load(graph_path())
         self.knowledge = KnowledgeBase.from_raw(RAW_DIR, self.graph)
         self.footprints = load_shapes(shapes_path())
-        client = OpenRouterClient(self.settings) if self.settings.llm_available else None
+        client = DeepSeekClient(self.settings) if self.settings.llm_available else None
         narrator = Narrator(client) if self.settings.narration_available else None
         self.dialogue = Dialogue(self.graph, client, narrator, knowledge=self.knowledge)
 
@@ -444,10 +444,10 @@ class App:
         updates: dict[str, str] = {}
         changes: dict[str, str] = {}
         if api_key is not None:
-            updates["OPENROUTER_API_KEY"] = api_key.strip()
+            updates["DEEPSEEK_API_KEY"] = api_key.strip()
             changes["api_key"] = api_key.strip()
         if model is not None and model.strip():
-            updates["OPENROUTER_MODEL"] = model.strip()
+            updates["DEEPSEEK_MODEL"] = model.strip()
             changes["model"] = model.strip()
         if not updates:
             return self.status()
@@ -457,7 +457,7 @@ class App:
             os.environ[key] = value          # keep the process in step with the file
         self.settings = replace(self.settings, **changes)
 
-        client = OpenRouterClient(self.settings) if self.settings.llm_available else None
+        client = DeepSeekClient(self.settings) if self.settings.llm_available else None
         narrator = Narrator(client) if self.settings.narration_available else None
         self.dialogue.client = client
         self.dialogue.narrator = narrator

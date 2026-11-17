@@ -31,7 +31,7 @@ class StubSettings:
 
 
 class StubClient:
-    """Pretends to be OpenRouterClient: returns whatever text we hand it."""
+    """Pretends to be DeepSeekClient: returns whatever text we hand it."""
 
     def __init__(self, reply: str, ok: bool = True) -> None:
         self.settings = StubSettings()

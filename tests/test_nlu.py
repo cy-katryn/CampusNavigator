@@ -246,7 +246,7 @@ class TestRouteAlternatives(unittest.TestCase):
 
 
 class StubClient:
-    """A stand-in for the OpenRouter client: returns one canned model reply."""
+    """A stand-in for the DeepSeek client: returns one canned model reply."""
 
     class settings:            # narrate.py and nlu.py both look at this
         llm_available = True

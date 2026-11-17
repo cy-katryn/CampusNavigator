@@ -13,7 +13,7 @@ import sys
 from .config import get_settings, graph_path, rel
 from .dialogue import Dialogue
 from .graph import CampusGraph
-from .llm import OpenRouterClient
+from .llm import DeepSeekClient
 from .narrate import Narrator
 from .search import compare
 
@@ -98,13 +98,13 @@ def main(argv: list[str] | None = None) -> int:
     if "--graph" in argv:
         return dump_graph(graph)
 
-    client = OpenRouterClient(settings) if settings.llm_available else None
+    client = DeepSeekClient(settings) if settings.llm_available else None
     narrator = Narrator(client) if settings.narration_available else None
     dialogue = Dialogue(graph, client, narrator)
 
     print(banner(settings, graph, rel(path)))
     if not settings.llm_available:
-        print("  note: no OPENROUTER_API_KEY found - running on the grammar parser only.\n")
+        print("  note: no DEEPSEEK_API_KEY found - running on the grammar parser only.\n")
 
     if "--demo" in argv:
         return run_demo(dialogue)

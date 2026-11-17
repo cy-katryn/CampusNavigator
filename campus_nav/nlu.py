@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass, field     
 
 from .graph import CampusGraph, Node
-from .llm import OpenRouterClient
+from .llm import DeepSeekClient
 
 INTENTS = (
     "route",          # find a way from A to B
@@ -102,7 +102,7 @@ def _place_catalogue(graph: CampusGraph, limit: int = 90) -> str:
     return "\n".join(rows)
 
 
-def parse_with_llm(text: str, graph: CampusGraph, client: OpenRouterClient) -> Slots | None:
+def parse_with_llm(text: str, graph: CampusGraph, client: DeepSeekClient) -> Slots | None:
     prompt = SYSTEM_PROMPT.format(
         places=_place_catalogue(graph),
         intents=", ".join(f'"{i}"' for i in INTENTS),
@@ -601,7 +601,7 @@ def parse_with_grammar(text: str, graph: CampusGraph) -> Slots:
     )
 
 
-def parse(text: str, graph: CampusGraph, client: OpenRouterClient | None) -> Slots:
+def parse(text: str, graph: CampusGraph, client: DeepSeekClient | None) -> Slots:
     """Ask the model first, retaining explicitly named endpoints when omitted."""
     route_text, avoid_stairs = stair_request(text)
     if client is not None and client.settings.llm_available:
