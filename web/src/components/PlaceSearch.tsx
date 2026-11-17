@@ -8,8 +8,38 @@ export interface PlaceSearchProps {
   onChoose(node: GraphNode): void;
 }
 
+/** Does `needle` appear at the start of a word, not inside one?
+ *
+ *  "pao" must find Pao Yue-Kong Library, and must not find the Institutional Planning
+ *  and Analytics Office, whose acronym "IPAO" happens to contain the letters p-a-o. */
+function startsAWord(text: string, needle: string): boolean {
+  if (!needle) return false;
+  let from = 0;
+  for (;;) {
+    const at = text.indexOf(needle, from);
+    if (at < 0) return false;
+    if (at === 0 || !/[a-z0-9]/.test(text[at - 1])) return true;
+    from = at + 1;
+  }
+}
+
+/** What a place IS, with its location bracket removed: "Block L (Pao Yue-Kong Library)"
+ *  and "Pao Yue-Kong Library" are two entries, "Anywhere (Block L)" twice is one. */
+function headOf(name: string): string {
+  return name
+    .replace(/[（(][^()（）]*[)）]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 /* Type a place, arrow through the hits, Enter to route. Searches the same node list
-   the map is drawn from, so anything visible on the map is findable here. */
+   the map is drawn from, so anything visible on the map is findable here.
+
+   Two rules keep the list honest, and they mirror the server-side resolver:
+   a match must start a word, and one answer per name -- the campus map publishes the
+   library as a main location, as the building it sits in, and as an office record, and
+   three rows that read the same are worse than one. */
 export function PlaceSearch({ nodes, onChoose }: PlaceSearchProps) {
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<GraphNode[]>([]);
@@ -35,18 +65,32 @@ export function PlaceSearch({ nodes, onChoose }: PlaceSearchProps) {
       setActive(-1);
       return;
     }
-    const found = places
+    const matches = places
       .filter(
         (node) =>
-          node.name.toLowerCase().includes(needle) ||
-          (node.service || '').toLowerCase().includes(needle),
+          startsAWord(node.name.toLowerCase(), needle) ||
+          startsAWord((node.service || '').toLowerCase(), needle),
       )
       .sort((a, b) => {
         const ai = a.name.toLowerCase().indexOf(needle);
         const bi = b.name.toLowerCase().indexOf(needle);
         return ai - bi || a.name.length - b.name.length;
-      })
-      .slice(0, 7);
+      });
+
+    // One row per name, preferring the place over a facility published under the same
+    // name. The duplicate rows stay reachable by typing their bracket ("LIB", "Block L").
+    const seen = new Map<string, GraphNode>();
+    for (const node of matches) {
+      const head = headOf(node.name);
+      const kept = seen.get(head);
+      if (!kept) {
+        seen.set(head, node);
+        continue;
+      }
+      if (kept.kind === 'facility' && node.kind !== 'facility') seen.set(head, node);
+    }
+    const found = Array.from(seen.values()).slice(0, 7);
+
     setHits(found);
     setOpen(true);
     setActive(found.length ? 0 : -1);

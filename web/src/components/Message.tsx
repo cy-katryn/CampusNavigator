@@ -20,7 +20,9 @@ function Summary({ payload }: { payload: ChatPayload }) {
   const bits: string[] = [];
   const route = payload.route;
   if (route && route.reachable) {
-    bits.push(route.segments.length + ' legs');
+    // "leg" in this app means the stretch between two named places (1 or 2 on a campus
+    // walk). The number of graph links is a different quantity, so it says so.
+    bits.push(route.segments.length + (route.segments.length === 1 ? ' segment' : ' segments'));
     if (route.stats) {
       bits.push(
         route.stats.algorithm.toUpperCase() +

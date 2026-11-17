@@ -8,8 +8,9 @@ Two planes, as Pinecone splits them:
 The index host is discovered once per process from the control plane and cached, so a
 conversation costs one query request per place phrase and no extra round-trip.
 
-Every failure raises `PineconeError`. There is no local fallback: place names come
-from this index or the message fails visibly.
+Every failure raises `PineconeError`. The caller decides what to do with it:
+`place_index.PlaceIndex` falls back to the built-in lexical scorer
+(`campus_nav/lexical.py`), so a dead index costs semantic matching, not the app.
 """
 from __future__ import annotations
 
@@ -173,8 +174,15 @@ class PineconeStore:
         ]
 
     def delete_all(self) -> None:
+        """Empty the namespace. A namespace that does not exist yet is already empty.
+
+        Pinecone answers 404 "Namespace not found" for the default namespace of a freshly
+        created index, and `--recreate` on a first build would otherwise fail before it
+        wrote anything.
+        """
         self._call(
             "POST",
             f"https://{self.host()}/vectors/delete",
             {"deleteAll": True, "namespace": self.settings.pinecone_namespace},
+            allow_404=True,
         )

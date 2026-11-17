@@ -7,6 +7,9 @@ export interface GraphNode {
   lat: number;
   lng: number;
   kind: NodeKind;
+  /** Published by PolyU but not reachable by any mapped walkway. */
+  off_network?: boolean;
+  nearest_m?: number;
   /** The campus map's own category, e.g. "Amenities" or "Main Locations". */
   category?: string;
   aliases?: string[];
@@ -68,6 +71,17 @@ export interface RouteStats {
   ms: number;
 }
 
+export interface Landmark {
+  id: string;
+  name: string;
+  /** Metres along the walk where you pass it. */
+  at_m: number;
+  /** How far the walked line passes from it. */
+  distance_m: number;
+  lat: number;
+  lng: number;
+}
+
 export interface RoutePayload {
   reachable: boolean;
   metres: number;
@@ -75,6 +89,8 @@ export interface RoutePayload {
   segments: RouteSegment[];
   stats: RouteStats | null;
   explain: unknown[];
+  /** Buildings the walk passes, in order: the names on the line. */
+  landmarks?: Landmark[];
 }
 
 /** One pickable way there: what the list in the reply shows, and the line to draw. */
@@ -88,6 +104,7 @@ export interface RouteOption {
   goal: string;
   path: RoutePoint[];
   segments: { path: [number, number][] }[];
+  landmarks?: Landmark[];
 }
 
 export interface FacilityCard {

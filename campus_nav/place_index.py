@@ -207,11 +207,26 @@ class PlaceIndex:
             found = found[:k]
         return found
 
+    # A whole-word match on a published name is stronger evidence than embedding
+    # proximity: "library" is a word in "Block L (Pao Yue-Kong Library)", while its
+    # nearest neighbours by cosine are a bookshop, a café and an AED -- related places,
+    # not the one that was named. Above this tier the lexical evidence wins; below it
+    # ("somewhere to fill my bottle") the embeddings are the only evidence there is.
+    NAME_EVIDENCE = 0.60
+
     def resolve(self, text: str) -> list[Node]:
         """The place(s) the phrase means, best first; empty when it means nothing."""
         hits = self.scored(text)
         if not hits:
             return []
+
+        if self.mode == MODE_DENSE:
+            named = {node.id for score, node in lexical.resolve_scored(self.graph, text)
+                     if score >= self.NAME_EVIDENCE}
+            if named:
+                restricted = [(score, node) for score, node in hits if node.id in named]
+                if restricted:
+                    hits = restricted
 
         # A phrase that names a building also matches the facilities standing inside it,
         # because their names contain the building label. Drop those followers; the
@@ -234,14 +249,28 @@ class PlaceIndex:
             floor = best - LEXICAL_BAND
         top = [(score, node) for score, node in hits if score >= floor]
 
-        # "library" matches "Pao Yue-Kong Library" (what the place IS) and, one tier
-        # down, "Block L (Pao Yue-Kong Library)" (where it is). When a phrase matches
-        # what a place IS, the same words inside a bracket are not an alternative --
-        # they are the same answer written the long way.
+        # One answer per name. "Pao Yue-Kong Library" (a place) and "Pao Yue-kong Library
+        # (LIB)" (a facility published under the same name) are one destination written
+        # twice, and asking "which one did you mean?" is a worse answer than picking the
+        # place. This is about the published names, so it applies to both resolvers.
+        # Facilities that merely share a service name -- the twenty-five toilets -- are
+        # distinct places and stay.
+        owned = {
+            lexical.name_parts(node.name)[0]
+            for _, node in top if node.kind != "facility"
+        }
+        if owned:
+            top = [
+                pair for pair in top
+                if pair[1].kind != "facility"
+                or lexical.name_parts(pair[1].name)[0] not in owned
+            ] or top
+
+        # In lexical mode, prefer matches on what a place IS over the same words inside a
+        # bracket: "library" must not also offer "Block L (Pao Yue-Kong Library)". Dense
+        # mode is left alone -- there the words need not appear in any name at all
+        # ("somewhere to fill a bottle"), so the same test would drop valid answers.
         if self.mode == MODE_LEXICAL and len(top) > 1:
-            # The same words the scorer used: "the library is closed" must test against
-            # "library", not against "library" and "closed" -- no place is named "closed",
-            # so requiring both silently switched this preference off.
             words = lexical.content_words(text)
             if words:
                 by_head = [
@@ -252,18 +281,5 @@ class PlaceIndex:
                 ]
                 if by_head:
                     top = by_head
-            # One answer per name. "Pao Yue-Kong Library" (a place) and "Pao Yue-kong
-            # Library (LIB)" (a facility with the same published name) are one
-            # destination written twice; keep the place. Facilities that merely share a
-            # service name -- the twenty-five toilets -- are distinct places and stay.
-            owned = {
-                lexical.name_parts(node.name)[0]
-                for _, node in top if node.kind != "facility"
-            }
-            if owned:
-                top = [
-                    pair for pair in top
-                    if pair[1].kind != "facility"
-                    or lexical.name_parts(pair[1].name)[0] not in owned
-                ] or top
+
         return [node for _, node in top]

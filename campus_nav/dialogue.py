@@ -19,6 +19,7 @@ from .config import RAW_DIR, get_settings
 from .facility_speech import FacilityResult, requested_day
 from .graph import CampusGraph, Node
 from .kb import KnowledgeBase, hours_summary, open_state, parse_slots, today_hours
+from .landmarks import landmarks_along
 from .llm import DeepSeekClient
 from .narrate import Facts, Narration, Narrator
 from .nlu import (REOPEN, Slots, names_destination, parse, parse_with_grammar,
@@ -518,6 +519,54 @@ class Dialogue:
                 break
         return options
 
+    def _via_stop(self, slots: Slots, origin: str, goal: str) -> tuple[str, str]:
+        """The place the user asked to walk through, plus a note when it cannot be used.
+
+        A stop that names nothing, names several places, or duplicates an endpoint is not
+        an error worth failing on: the note explains it and the direct route still runs.
+        """
+        text = (getattr(slots, "via_text", "") or "").strip()
+        if not text:
+            return "", ""
+        hits = self._preferred_matches(text)
+        if not hits:
+            return "", f'There is no place called "{text}" here, so this is the direct route.'
+        if len(hits) > 1:
+            options = ", ".join(node.name for node in hits[:3])
+            return "", f'"{text}" could be {options}. Ask again naming one, or I will route directly.'
+        stop = hits[0].id
+        if stop in (origin, goal):
+            return "", ""
+        return stop, ""
+
+    def _routed_via(self, origin: str, stop: str, goal: str) -> list[RouteResult]:
+        """One route through a named stop: two A* searches, joined end to end.
+
+        No alternatives are offered for a journey with a stop. Each extra option would be
+        a different pair of searches, and "the second best way through Core P" is not a
+        question anybody asked; the stop is the interesting part of the answer.
+        """
+        first = self._best_route(origin, stop)
+        if not first.reachable:
+            return [first]
+        second = self._best_route(stop, goal)
+        if not second.reachable:
+            return [second]
+        return [
+            RouteResult(
+                reachable=True,
+                algorithm="astar",
+                # The stop appears once, and it is a named node, so the leg count in the
+                # reply (2) and the drawn line both come from the joined path itself.
+                path=list(first.path) + list(second.path)[1:],
+                total_metres=first.total_metres + second.total_metres,
+                segments=list(first.segments) + list(second.segments),
+                stats=None,          # two searches: a single node count would be a fiction
+                explain=first.explain,
+                blocking={**first.blocking, **second.blocking},
+            )
+        ]
+
     def _describe_alternatives(self, routes: list[RouteResult]) -> str:
         """One line per alternative, in the text, for the terminal and for search."""
         lines = []
@@ -559,6 +608,21 @@ class Dialogue:
                 slots=slots,
             )
 
+        # A place PolyU publishes but no walkway reaches cannot be walked to. Say exactly
+        # that instead of "I cannot find a route", which reads like a bug in the search.
+        for node_id, role in ((destination, "destination"), (origin, "start")):
+            endpoint = self.graph.node(node_id)
+            if getattr(endpoint, "off_network", False):
+                return Reply(
+                    (prefix + "\n" if prefix else "")
+                    + f"{endpoint.name} is published by PolyU, but nothing joins it to "
+                    "the mapped walkway network (the nearest path point is "
+                    f"{endpoint.nearest_m:.0f} m away), so no walking route can reach it. "
+                    "It is on the map, and I can point at it, but I cannot make it your "
+                    f"{role}.",
+                    slots=slots,
+                )
+
         previous_total = self.state.last_route.total_metres if self.state.last_route else None
 
         # A building anchor sits at the polygon's centre, so a route to it ends with a
@@ -575,10 +639,19 @@ class Dialogue:
         if place.kind != "entrance" and parent and parent in self.graph.nodes:
             indoor_note = self._indoor_text(destination)
             goal = parent
-        routes = self._route_options(origin, goal)
+        # A stop on the way is two searches stitched into one walk: into the stop, then
+        # out of it. Everything downstream (leg count, metre total, the drawn line, the
+        # spoken summary) reads the joined result, so nothing has to know it was two.
+        stop, via_note = self._via_stop(slots, origin, goal)
+        if stop:
+            routes = self._routed_via(origin, stop, goal)
+        else:
+            routes = self._route_options(origin, goal)
         route = routes[0]
 
         notes: list[str] = []
+        if via_note:
+            notes.append(via_note)
         constraints = []
         if self.state.avoid_stairs:
             constraints.append("avoid mapped stairs")
@@ -601,15 +674,26 @@ class Dialogue:
             template = "\n".join(body)
             facts = self._facts_from_route(route, origin, destination, constraints, previous_total)
             narration = self._narrate(facts)
-            text = (narration.text + "\n\n" + template) if narration.ok else template
-            reply = Reply((prefix + "\n" if prefix else "") + text, route=route, slots=slots,
-                          notes=notes, routes=routes)
+            reply = Reply(
+                (prefix + "\n" if prefix else "") + template,
+                route=route, slots=slots, notes=notes, routes=routes,
+                # The model's sentence is what gets spoken and what the bubble leads with;
+                # the template stays behind the details toggle. Prepending it to the text
+                # showed the same answer twice in two wordings.
+                spoken=narration.text if narration.ok else "",
+            )
             self._attach_narration(reply, narration)
             return reply
 
         text = fmt_route(self.graph, route)
         if len(routes) > 1:
             text += "\n" + self._describe_alternatives(routes)
+        # The walkway has no names; the buildings beside it do. Naming a few gives the
+        # reader something to look for on the way, and they are published places, not
+        # guesses: each one is a node whose edge the measured line passes within 20 m.
+        marks = landmarks_along(self.graph, route)
+        if marks:
+            text += "\nYou will pass: " + ", ".join(mark["name"] for mark in marks[:4]) + "."
         if indoor_note:
             text += "\n" + indoor_note
         if previous_total is not None:
@@ -641,9 +725,11 @@ class Dialogue:
         # Level B: the model phrases the answer, the calculation supplies the facts.
         facts = self._facts_from_route(route, origin, destination, constraints, previous_total)
         narration = self._narrate(facts)
-        body = (narration.text + "\n\n" + text) if narration.ok else text
-        reply = Reply((prefix + "\n" if prefix else "") + body, route=route, slots=slots,
-                      notes=notes, comparison=comparison, routes=routes)
+        reply = Reply(
+            (prefix + "\n" if prefix else "") + text,
+            route=route, slots=slots, notes=notes, comparison=comparison, routes=routes,
+            spoken=narration.text if narration.ok else "",
+        )
         self._attach_narration(reply, narration)
         return reply
 
@@ -1136,11 +1222,17 @@ class Dialogue:
         ]
         if why:
             lines.append(f"Reason: {why}.")
-        known = sorted({a for n in self.graph.nodes.values() for a in n.accepts})
-        if known:
+        # The capabilities (water, toilets, AEDs) are only part of what this map carries;
+        # listing just those made the refusal sound narrower than the bot is. The service
+        # labels are the actual vocabulary: clinics, canteens, bookstores, banks …
+        services = sorted({
+            n.service for n in self.graph.nodes.values()
+            if n.kind == "facility" and n.service
+        })
+        if services:
             lines.append(
-                "What I do cover: walking routes between campus places, and the facilities "
-                f"the map does carry: {', '.join(human_category(k) for k in known)}."
+                "What I do cover: walking routes between campus places, and these facilities "
+                f"on the map: {', '.join(services)}."
             )
         if documents:
             lines.append(

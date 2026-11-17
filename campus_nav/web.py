@@ -58,6 +58,7 @@ from .embeddings import EmbeddingClient, EmbeddingError
 from .facility_speech import facility_details, facility_summary, local_hours
 from .graph import CampusGraph
 from .kb import KnowledgeBase
+from .landmarks import landmarks_along
 from .llm import DeepSeekClient
 from .local_names import building_name, floor_name, localize_label, place_name
 from .narrate import Narrator
@@ -227,6 +228,8 @@ def route_payload(graph: CampusGraph, route, lang: str = "en-US") -> dict | None
             else None
         ),
         "explain": route.explain[:8],
+        # The blocks the walk passes, in order, so the map can put names on the line.
+        "landmarks": landmarks_along(graph, route),
     }
 
 
@@ -246,6 +249,7 @@ def route_option(graph: CampusGraph, route, lang: str = "en-US") -> dict | None:
         "flights": sum(1 for seg in route.segments if seg.stairs),
         "covered": sum(1 for seg in route.segments if seg.covered),
         "via": via,
+        "landmarks": landmarks_along(graph, route),
         "start": place_name(graph, route.path[0], lang),
         "goal": place_name(graph, route.path[-1], lang),
         "path": [
@@ -415,7 +419,18 @@ def write_env(updates: dict[str, str], path: Path = ENV_PATH) -> None:
     """
     existing = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     if not existing:
-        existing = ["# Local settings. Never commit this file -- it is in .gitignore.", ""]
+        # Start from the documented template when there is one, so the file the dialog
+        # creates carries every setting and its explanation -- not just the four keys the
+        # dialog happens to write. Values in the template are the defaults.
+        template = path.with_name(".env.example")
+        if template.exists():
+            lines = template.read_text(encoding="utf-8").splitlines()
+            while lines and (lines[0].startswith("#") or not lines[0].strip()):
+                lines.pop(0)          # the template's "copy this file" preamble
+            existing = ["# Local settings. Never commit this file -- it is in .gitignore.", ""]
+            existing += lines
+        else:
+            existing = ["# Local settings. Never commit this file -- it is in .gitignore.", ""]
 
     remaining = dict(updates)
     out: list[str] = []
@@ -528,6 +543,9 @@ class App:
                     "service": n.service,
                     "accepts": list(n.accepts),
                     "floor": n.floor,
+                    # Published by PolyU, but no walkway reaches it: drawn, not routable.
+                    "off_network": n.off_network,
+                    "nearest_m": n.nearest_m,
                 }
                 for n in self.graph.nodes.values()
             ],

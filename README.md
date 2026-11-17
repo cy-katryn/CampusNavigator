@@ -183,6 +183,10 @@ than inventing a route. To change the map: edit a GeoJSON in `data/authored/`, r
   understands only phrasings the grammar enumerates; without the vector index a place must
   be named roughly as the map publishes it. Both are stated in the reply when they matter
   (`/api/status` reports which mode is live) rather than silently degrading.
+- **Some published places are not on the walkway network.** Halls, the West Kowloon campus
+  and a few schools on other sites sit 150–1600 m from the nearest drawn walkway. They stay
+  in the graph — drawn with a dashed ring — and the reply says plainly that no walking route
+  can reach them, instead of failing as if the search had broken.
 - **Positions are published positions, not a survey.** One campus-map coordinate per building
   is shared by every POI inside it — the floor field is what distinguishes them.
 - **Distances are modelled.** Edge length is measured along the drawn walkway; the last few

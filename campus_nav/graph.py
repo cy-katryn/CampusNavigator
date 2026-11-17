@@ -64,6 +64,11 @@ class Node:
     accepts: tuple[str, ...] = ()  # canonical capabilities this point accepts
     source: str = ""             # "campus-map" -- provenance of the place
     ref: str = ""                # that source's own record id (poi_id)
+    # True when PolyU publishes this place but no drawn walkway reaches it (another
+    # campus, a hall across the road). It is drawn on the map and can be looked up, but
+    # it has no edges, so no route can end there -- and the reply says why.
+    off_network: bool = False
+    nearest_m: float = 0.0       # metres to the nearest walkway vertex, when off_network
 
     def distance_to(self, other: "Node") -> float:
         return haversine_m(self.lat, self.lng, other.lat, other.lng)
@@ -121,6 +126,8 @@ class CampusGraph:
                 accepts=tuple(n.get("accepts", ())),
                 source=n.get("source", ""),
                 ref=str(n.get("ref", "")),
+                off_network=bool(n.get("off_network")),
+                nearest_m=float(n.get("nearest_m") or 0.0),
             )
             for n in raw["nodes"]
         }

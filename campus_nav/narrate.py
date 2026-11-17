@@ -111,6 +111,14 @@ class Facts:
             add(metres)
         for count in (len(self.segment_lines), len(self.options), len(self.blocking)):
             add(count)
+        # A numeral inside a published place name belongs to the name, not to the answer:
+        # "7-Eleven" made every correctly phrased narration look like an invented figure
+        # (rejected with "ungrounded number(s): 7"), and the template replied instead.
+        named = [self.origin, self.destination, *self.segment_lines, *self.options,
+                 *self.blocking]
+        for name in named:
+            for token in NUMBER.findall(str(name or "")):
+                add(token)
         return allowed
 
 

@@ -51,17 +51,33 @@ Return ONLY a JSON object with exactly these keys:
   "intent": one of {intents},
   "origin": place id or null,
   "destination": place id or null,
+  "via": a place to walk through on the way, or null,
   "closed": the place or link the user says is closed, as free text, or null,
-  "item": short lowercase item or facility name ("batteries", "aed") or null,
+  "item": the facility this question needs, from the list below, or null,
   "language": "en" or "zh"
 }}
 
+The facilities this map carries (use these words for "item"):
+{facilities}
+
 Rules:
-- Never invent a place id that is not in the list. If the user names a place that
-  is not listed, put null and keep intent "route".
+- Never invent a place id that is not in the list. If the user names a place that is
+  not listed, put their words there verbatim ("destination": "the 7-Eleven") and keep
+  the intent -- the app resolves names itself, and it knows places this short list
+  leaves out. Never answer null for a place the user actually named: that silently
+  turns their question into "where do you want to go?".
 - "is the canteen open now", "opening hours of the clinic" -> intent "hours_query".
 - "where is the nearest AED / toilet / water station" -> intent "facility_query"
   with item set to that facility ("aed", "toilet", "water station").
+- A need rather than a facility name still belongs in "item": map it to the closest
+  amenity in the list above. Examples: "art supplies", "a printer", "printing",
+  "photocopy", "paper", "stationery" -> bookstore; "cash", "money", "withdraw" -> bank; "something to eat", "lunch" ->
+  catering outlets; "a doctor", "medicine", "feel unwell" -> clinics; "a room to pray"
+  -> prayer room; "fill my bottle", "drinking water" -> water station; "a bus" ->
+  bus stop. Use the label exactly as written in the list.
+  Never answer a need with a housekeeping label; pick the amenity a person would walk to.
+  If no amenity in the list is a reasonable answer, leave "item" null.
+- "from A, pass by C, then B" -> origin A, via C, destination B.
 - Output JSON only, no prose, no code fences."""
 
 
@@ -72,6 +88,7 @@ class Slots:
     destination_text: str = ""
     closed_text: str = ""    # the raw words around a closure ("the library is closed")
     item: str = ""
+    via_text: str = ""     # a place to walk through on the way ("pass by Core P")
     subject: str = ""      # the raw words the question is *about* (hours/facility queries)
     language: str = "en"
     source: str = "grammar"
@@ -84,6 +101,29 @@ class Slots:
     @property
     def mentions_places(self) -> bool:
         return bool(self.origin_text or self.destination_text)
+
+
+# Labels that answer "where can I get X". The directory labels are excluded: offered as
+# options, a model asked for cash answers "office", which is true of 45 places and useful
+# for none. Everything else the map publishes is an amenity somebody would walk to.
+_DIRECTORY_LABELS = frozenset({
+    "office", "faculty / department", "lecture theatre", "building", "sports facilities",
+    "facility", "",
+})
+
+
+def _facility_words(graph: CampusGraph) -> list[str]:
+    """The amenity labels this map actually carries, for the prompt.
+
+    Read from the graph rather than written into the prompt, so a facility the map does
+    not have can never be offered to the model as an option.
+    """
+    labels = {
+        node.service.strip().lower() for node in graph.nodes.values()
+        if node.kind == "facility" and node.service
+    }
+    amenities = labels - _DIRECTORY_LABELS
+    return sorted(amenities or labels)
 
 
 def _place_catalogue(graph: CampusGraph, limit: int = 90) -> str:
@@ -115,6 +155,7 @@ def parse_with_llm(text: str, graph: CampusGraph, client: DeepSeekClient) -> Slo
     prompt = SYSTEM_PROMPT.format(
         places=_place_catalogue(graph),
         intents=", ".join(f'"{i}"' for i in INTENTS),
+        facilities=", ".join(_facility_words(graph)),
     )
     result = client.chat(
         [
@@ -133,18 +174,25 @@ def parse_with_llm(text: str, graph: CampusGraph, client: DeepSeekClient) -> Slo
         return None
 
     def as_id(value) -> str:
-        """Keep a valid node id; keep the user's own wording for anything else.
+        """Turn what the model reported into the words this app resolves places by.
 
-        An id the model invented is never trusted, but the *text* is not thrown away:
-        it is resolved against the place index afterwards by
-        Dialogue._preferred_matches(). This is the boundary the module docstring
-        describes -- the model may report what the user said, it may not create a
-        place.
+        A real node id becomes that node's *name*, because the rest of the pipeline
+        resolves place names through the index -- and an id is not a name. Embedding
+        "POI_5bcd371552_67" lands between unrelated neighbours (it scored 0.59 for Core B
+        and 0.55 for Block Z, while the id belonged to Pao Yue-Kong Library), so the
+        model's correct answer arrived as "which Core B did you mean?".
+
+        Free text is kept as written: it is resolved by name later, and an id the model
+        invented matches no node and stays text. This is the boundary the module
+        docstring describes -- the model may report a place, it may not create one.
         """
         if not isinstance(value, str) or not value.strip():
             return ""
         candidate = value.strip()
-        return candidate   # an id resolves directly; free text resolves by name later
+        node = graph.nodes.get(candidate)
+        if node is not None and node.kind != "waypoint":
+            return node.name
+        return candidate
 
     closed = payload.get("closed")
     closed_text = closed.strip() if isinstance(closed, str) else ""
@@ -155,6 +203,7 @@ def parse_with_llm(text: str, graph: CampusGraph, client: DeepSeekClient) -> Slo
         destination_text=as_id(payload.get("destination")),
         closed_text=closed_text,
         item=str(payload.get("item") or "").strip().lower(),
+        via_text=as_id(payload.get("via")),
         subject=text.strip() if intent in ("hours_query", "facility_query") else "",
         language=str(payload.get("language") or "en"),
         source="llm",
@@ -202,6 +251,11 @@ def stair_request(text: str) -> tuple[str, bool | None]:
 
 
 # --- grammar fallback -----------------------------------------------------
+# Every rule below is a *signal*: it answers one yes/no question about the sentence, and
+# parse_with_grammar() decides the intent from those answers in a fixed order. Keeping
+# the decision in one place is what stops a new phrasing from quietly changing an old
+# one -- the order is the specification.
+
 # "re-open it" lifts every closure, so a demo can recover from its own failure.
 REOPEN = re.compile(
     r"\b(re-?open|open (?:it|that|them|everything) again|restore|unblock|"
@@ -231,10 +285,15 @@ _DISTANCE_BETWEEN = re.compile(
 # Spoken requests often omit "from": "Core D to Block Z". Keep commands
 # such as "take me to the library" as destination-only requests.
 _PLACE_TO_PLACE = re.compile(r"^(?P<o>.+?)\s+to\s+(?P<d>.+?)(?:[?.!,]|$)", re.I)
-_EN_COMMAND = re.compile(
-    r"^(?:how|where|what|when|why|which|can|could|would|is|are|i|we|please|"
-    r"take|go|get|walk|head|navigate|directions?|route|who|will|do|does|tell|show|need|want|to|from|at|of|in|on|and|the link)\b", re.I,
-)
+# A word list, not a pattern: the sentence opens with a command or a question. Used as
+# a guard only -- "Core D to Block Z" is a route request, "the link to Core D" is not.
+_COMMAND_WORDS = frozenset({
+    "how", "where", "what", "when", "why", "which", "can", "could", "would", "is",
+    "are", "i", "we", "please", "take", "go", "get", "walk", "head", "navigate",
+    "direction", "directions", "route", "who", "will", "do", "does", "tell", "show",
+    "need", "want", "to", "from", "at", "of", "in", "on", "and",
+})
+_COMMAND_PHRASES = ("the link",)
 # Both scripts are accepted. Keep each campus place intact, including English
 # names embedded in a Chinese utterance ("由 Core D 去 Block Z 點行？").
 _ZH_PAIR = re.compile(
@@ -270,18 +329,44 @@ _DISTANCE_FOLLOWUP = re.compile(
     r"(?:有)?(?:多[遠远]|[幾几][遠远])", re.I,
 )
 
-# Opening-hours questions. Deliberately checked BEFORE the closure rule, because
-# "is the canteen closed on Sunday?" is a question about a timetable, not an
-# instruction to close a passage.
-_HOURS_EN = re.compile(
+# "Is this a timetable question?" -- one signal, both languages. They were three
+# patterns (English words, Chinese 幾點-class words, Chinese 開/關-class words) that were
+# only ever tested for truth, and their union is what the decision actually used.
+# Checked BEFORE the closure rule: "is the canteen closed on Sunday?" is a timetable
+# question, while "the link to Core D is closed" is an instruction.
+_HOURS = re.compile(
     r"\b(opening hours?|opening times?|business hours?|what time|which time|"
     r"until when|how late|when (?:is|does|do)\b[^?]*\b(?:open|close)|"
     r"(?:is|are)\b[^?]*\b(?:open|closed)(?![a-z])|still open|open (?:today|now|tonight|"
-    r"on (?:mon|tue|wed|thu|fri|sat|sun))|close[sd]? at|hours? of)\b",
+    r"on (?:mon|tue|wed|thu|fri|sat|sun))|close[sd]? at|hours? of)\b"
+    r"|幾點|幾時|開放|營業|開門|關門|時間|關了|開了"
+    r"|[開开](?:放|門|门|館|馆|到|咗|了|唔[開开]|不[開开])|[關关][門门館馆]"
+    r"|[營营][業业]|[幾几][點点時时]|什[麼么][時时]候|收[幾几][點点]|有冇[開开]"
+    r"|(?:有|[仲還还])[開开]|[開开][嗎吗未]",
     re.I,
 )
-_HOURS_ZH = re.compile(r"(幾點|幾時|開放|營業|開門|關門|時間|關了|開了)")
 
+# Where the question points, and how it is phrased. Named so that the decision in
+# parse_with_grammar() reads as prose instead of an anonymous re.match().
+_PASSAGE = re.compile(r"\b(passage|link|walkway|corridor|connection|route|entrance|exit)\b", re.I)
+_ASKS_AS_HOURS = re.compile(r"^(?:what time|when|is|are)\b", re.I)
+_SEEKS_NEAREST = re.compile(r"^(?:where|which|what|find|show|locate)\b.*?\b(?:closest|nearest)\b", re.I)
+_CLOSED_WORD = re.compile(r"\bclosed\b", re.I)
+_HAS_CJK = re.compile(r"[\u3400-\u9fff]")
+
+# --- facility: which service does the question name, if any --------------------
+# One pattern, not two. These are the words a person uses for the things this map
+# carries; the captured group is the item the dialogue then looks up.
+
+
+# --- meta: the two commands that are about the conversation, not the campus ------
+_RESET = re.compile(r"^\s*(reset|restart|start over|clear|new route)\s*$", re.I)
+_HELP = re.compile(r"\b(help|what can you do|how do you work)\b", re.I)
+
+# --- Chinese: the same eight intents, written differently -----------------------
+# The lexicon is data: a service word (or several) per facility. Everything else the
+# Chinese rules need is a small named pattern, gathered here rather than interleaved
+# with the English ones.
 # Vocabulary for the categories actually searched. Keep the user's place or item
 # wording separately, so an unknown service never turns into a generic list.
 _ZH_SERVICES = {
@@ -295,71 +380,28 @@ _ZH_SERVICES = {
     "lactation room": r"集乳室|哺乳室|母[嬰婴]室", "prayer room": r"祈[禱祷]室",
 }
 _ZH_SERVICE = re.compile("|".join(f"(?P<s{i}>{words})" for i, words in enumerate(_ZH_SERVICES.values())), re.I)
-_ZH_TIMETABLE = re.compile(
-    r"[開开](?:放|門|门|館|馆|到|咗|了|唔[開开]|不[開开])|[關关][門门館馆]|"
-    r"[營营][業业]|[幾几][點点時时]|什[麼么][時时]候|收[幾几][點点]|有冇[開开]|(?:有|[仲還还])[開开]|[開开][嗎吗未]"
-)
 _ZH_WHERE = re.compile(r"最近|附近|哪[裏里儿]|[哪邊边]度|[邊边]個|有[冇沒没]|在哪|有哪|[搵找]|有[咩乜]|有什[么麼]")
 _ZH_OVERVIEW = re.compile(r"(?:有|列[出舉举]|看看|[顯显]示).*(?:[設设]施|[設设][備备])|[設设]施(?:列表|清[單单])")
 _ZH_CHOICE = re.compile(r"第\s*([一二兩两三四五六七八九十1-9])\s*(?:[個个處处項项間间家]|座)|最近(?:的|嗰|那)[個个間间家]|[那嗰這这](?:一)?[個个間间家]")
 _ZH_ROUTE_ACTION = re.compile(r"[帶带]我|怎[么麼]去|[點点]去|去第|去[那嗰]|去最近|[導导]航|怎[么麼]走|[點点]行")
 
-
-def _chinese_facility(text: str, places: PlaceResolver) -> Slots | None:
-    if not re.search(r"[\u3400-\u9fff]", text):
-        return None
-    phrase = text.strip(" ?？!！.。，")
-    match = _ZH_SERVICE.search(phrase)
-    item = list(_ZH_SERVICES)[int(match.lastgroup[1:])] if match else ""
-    choice = _ZH_CHOICE.search(phrase)
-    hours = _ZH_TIMETABLE.search(phrase)
-    place_words = re.sub(r"^(?:[請请][問问](?:一下)?|[請请]|想[問问](?:一下)?)", "", phrase).strip()
-    slots = Slots(language="zh", subject=phrase, source="grammar", item=item)
-    if not item and re.fullmatch(r"最近(?:的|嘅|嗰個|那[个個])?(?:[喺在]?[哪邊边](?:[裡里裏度儿兒])?)[呀啊呢]?", phrase):
-        slots.intent, slots.facility_choice = "facility_query", 0
-        return slots
-    if choice and not item:
-        index = choice.group(1) or "一"
-        slots.facility_choice = ("一二三四五六七八九十".index(index.replace("兩", "二").replace("两", "二"))
-                                 if not index.isascii() else int(index) - 1)
-        slots.intent = "hours_query" if hours else ("route" if _ZH_ROUTE_ACTION.search(phrase) else "facility_query")
-        return slots
-    if not item and re.fullmatch(r"(?:它|佢|[那咁]麼?|[那咁])?(?:的|嘅)?(?:[營营][業业]|[開开]放)?[時时][間间][呢呀啊]?", phrase):
-        slots.intent, slots.facility_choice = "hours_query", 0
-        return slots
-    if hours:
-        slots.intent = "hours_query"
-        if not item and (re.match(r"^(?:它|佢|嗰度|那里|那裡)", place_words) or
-                         re.fullmatch(r"(?:今日|今天|而家|現在|现在)?(?:[幾几][點点時时]|什[麼么][時时]候)?"
-                                      r"(?:[開开關关][門门]?|[營营][業业]|[開开]放)[吗嗎呢呀啊未]?", place_words)):
-            slots.facility_choice = 0
-        slots.facility_target = place_words
-        return slots
-    explicit_route = names_destination(phrase, places)
-    if explicit_route and not (_ZH_WHERE.search(phrase) and not _ZH_ROUTE_ACTION.search(phrase)):
-        return None
-    if item and (_ZH_WHERE.search(phrase) or not explicit_route):
-        slots.intent = "facility_query"
-        slots.facility_target = match.group()
-        reference = (re.search(r"(?:距[離离]|[離离])\s*(.+?)\s*最近", place_words)
-                     or re.search(r"^我(?:而家|依家|現在|现在)?[喺在]\s*([^，,。]+?)(?:[，,。]|附近|最近)", place_words)
-                     or re.search(r"^(.+?)(?:附近|旁[边邊])", place_words))
-        if reference:
-            slots.facility_origin = reference.group(1).strip(" ，,的嘅")
-            if re.fullmatch(r"我(?:[這这哪呢]?[裡里裏度邊边兒儿]|所[在處处]|(?:目前|[現现]在)?的位置)?|"
-                            r"[當当]前位置|[這这呢][裡里裏度兒儿]|身[邊边]", slots.facility_origin):
-                slots.facility_origin = ""
-        return slots
-    if _ZH_OVERVIEW.search(phrase):
-        slots.intent = "facility_query"
-        return slots
-    return None
-# "where is the nearest AED / toilet / water station" -- a facility, not a place name
-# A sentence that names a physical link is talking about the map, not a timetable,
-# even when it contains the word "closed": "the link to Core D is closed" is an
-# instruction, while "is the canteen closed on Sunday" is a question about hours.
-_PASSAGE = re.compile(
-    r"\b(passage|link|walkway|corridor|connection|route|entrance|exit)\b", re.I
+# The shapes that carry no place of their own: a bare "where is the nearest one", a bare
+# "what time", and the three ways a question says where it is measured from.
+_ZH_NEAREST_ONLY = re.compile(r"最近(?:的|嘅|嗰個|那[个個])?(?:[喺在]?[哪邊边](?:[裡里裏度儿兒])?)[呀啊呢]?")
+_ZH_TIME_ONLY = re.compile(r"(?:它|佢|[那咁]麼?|[那咁])?(?:的|嘅)?(?:[營营][業业]|[開开]放)?[時时][間间][呢呀啊]?")
+_ZH_POINTS_AT_PLACE = re.compile(r"^(?:它|佢|嗰度|那里|那裡)")
+_ZH_TIME_QUESTION = re.compile(
+    r"(?:今日|今天|而家|現在|现在)?(?:[幾几][點点時时]|什[麼么][時时]候)?"
+    r"(?:[開开關关][門门]?|[營营][業业]|[開开]放)[吗嗎呢呀啊未]?"
+)
+_ZH_REFERENCE_PATTERNS = (
+    re.compile(r"(?:距[離离]|[離离])\s*(.+?)\s*最近"),
+    re.compile(r"^我(?:而家|依家|現在|现在)?[喺在]\s*([^，,。]+?)(?:[，,。]|附近|最近)"),
+    re.compile(r"^(.+?)(?:附近|旁[边邊])"),
+)
+_ZH_IS_HERE = re.compile(
+    r"我(?:[這这哪呢]?[裡里裏度邊边兒儿]|所[在處处]|(?:目前|[現现]在)?的位置)?|"
+    r"[當当]前位置|[這这呢][裡里裏度兒儿]|身[邊边]"
 )
 
 _FACILITY = re.compile(
@@ -374,9 +416,6 @@ _FACILITY = re.compile(
 _FACILITY_ALL = re.compile(
     r"\b(facilit(?:y|ies)|amenities|what places|what can i find|what is here|"
     r"what's here|what is available|what services)\b", re.I)
-
-_RESET = re.compile(r"^\s*(reset|restart|start over|clear|new route)\s*$", re.I)
-_HELP = re.compile(r"\b(help|what can you do|how do you work)\b", re.I)
 
 _FILLER = {
     "the", "a", "an", "please", "now", "me", "campus", "polyu", "building",
@@ -412,9 +451,23 @@ def refers_to_last_distance(text: str) -> bool:
     return bool(_DISTANCE_FOLLOWUP.fullmatch(route_text.rstrip("？！。?!. ")))
 
 
+def opens_with_a_request(text: str) -> bool:
+    """Does the sentence start with a command or question word?"""
+    lowered = (text or "").lstrip().lower()
+    if lowered.startswith(_COMMAND_PHRASES):
+        return True
+    words = re.findall(r"[a-z]+", lowered)
+    return bool(words) and words[0] in _COMMAND_WORDS
+
+
+# The shapes that name a pair, in priority order. Data, not a chain of ors: the order is
+# the tie-break rule when a sentence fits two shapes, so it belongs somewhere readable.
+_PAIR_PATTERNS = (_FROM_TO, _AT_AND_GO, _TO_FROM, _DISTANCE_BETWEEN, _ZH_TO_FROM, _ZH_PAIR)
+
+
 def _route_pair(text: str, places: PlaceResolver) -> re.Match | None:
-    pair = (_FROM_TO.search(text) or _AT_AND_GO.search(text) or _TO_FROM.search(text) or _DISTANCE_BETWEEN.search(text)
-            or _ZH_TO_FROM.search(text) or _ZH_PAIR.search(text))
+    pair = next((found for pattern in _PAIR_PATTERNS
+                 if (found := pattern.search(text))), None)
     chinese_clause = text.rstrip(" 。！？?!")
     if pair is None and _ZH_DISTANCE_END.search(chinese_clause):
         pair = _ZH_DISTANCE_FROM.match(_ZH_DISTANCE_END.sub("", chinese_clause).strip())
@@ -428,7 +481,7 @@ def _route_pair(text: str, places: PlaceResolver) -> re.Match | None:
             # accept this shorthand if both sides name a place in the index.
             if all(places.resolve(name) for name in short.group("o", "d")):
                 pair = short
-    if pair is None and not _EN_COMMAND.search(text):
+    if pair is None and not opens_with_a_request(text):
         pair = _PLACE_TO_PLACE.match(text)
     return pair
 
@@ -444,6 +497,52 @@ def names_destination(text: str, places: PlaceResolver) -> bool:
     return bool(_TO_ONLY.search(text) or _ZH_TO.match(text.strip()) or _route_pair(text.strip(), places))
 
 
+def _chinese_facility(text: str, places: PlaceResolver) -> Slots | None:
+    if not _HAS_CJK.search(text):
+        return None
+    phrase = text.strip(" ?？!！.。，")
+    match = _ZH_SERVICE.search(phrase)
+    item = list(_ZH_SERVICES)[int(match.lastgroup[1:])] if match else ""
+    choice = _ZH_CHOICE.search(phrase)
+    hours = _HOURS.search(phrase)
+    place_words = re.sub(r"^(?:[請请][問问](?:一下)?|[請请]|想[問问](?:一下)?)", "", phrase).strip()
+    slots = Slots(language="zh", subject=phrase, source="grammar", item=item)
+    if not item and _ZH_NEAREST_ONLY.fullmatch(phrase):
+        slots.intent, slots.facility_choice = "facility_query", 0
+        return slots
+    if choice and not item:
+        index = choice.group(1) or "一"
+        slots.facility_choice = ("一二三四五六七八九十".index(index.replace("兩", "二").replace("两", "二"))
+                                 if not index.isascii() else int(index) - 1)
+        slots.intent = "hours_query" if hours else ("route" if _ZH_ROUTE_ACTION.search(phrase) else "facility_query")
+        return slots
+    if not item and _ZH_TIME_ONLY.fullmatch(phrase):
+        slots.intent, slots.facility_choice = "hours_query", 0
+        return slots
+    if hours:
+        slots.intent = "hours_query"
+        if not item and (_ZH_POINTS_AT_PLACE.match(place_words)
+                         or _ZH_TIME_QUESTION.fullmatch(place_words)):
+            slots.facility_choice = 0
+        slots.facility_target = place_words
+        return slots
+    explicit_route = names_destination(phrase, places)
+    if explicit_route and not (_ZH_WHERE.search(phrase) and not _ZH_ROUTE_ACTION.search(phrase)):
+        return None
+    if item and (_ZH_WHERE.search(phrase) or not explicit_route):
+        slots.intent = "facility_query"
+        slots.facility_target = match.group()
+        reference = next((found for pattern in _ZH_REFERENCE_PATTERNS
+                          if (found := pattern.search(place_words))), None)
+        if reference:
+            slots.facility_origin = reference.group(1).strip(" ，,的嘅")
+            if _ZH_IS_HERE.fullmatch(slots.facility_origin):
+                slots.facility_origin = ""
+        return slots
+    if _ZH_OVERVIEW.search(phrase):
+        slots.intent = "facility_query"
+        return slots
+    return None
 def parse_with_grammar(text: str, places: PlaceResolver) -> Slots:
     lowered, avoid_stairs = stair_request(text)
 
@@ -460,9 +559,12 @@ def parse_with_grammar(text: str, places: PlaceResolver) -> Slots:
         return Slots(intent="close", closed_text=lowered.strip(), source="grammar")
     if refers_to_last_distance(lowered):
         return Slots(intent="distance", avoid_stairs=avoid_stairs, source="grammar",
-                     language="zh" if re.search(r"[\u4e00-\u9fff]", lowered) else "en")
+                     language="zh" if _HAS_CJK.search(lowered) else "en")
 
     origin_text = destination_text = ""
+    # A stop ("pass by Core P") is read by the model, not by these patterns: cutting a
+    # clause out of the sentence moved the endpoints ("Block X" became the destination)
+    # far more often than it helped. The grammar keeps its two-slot contract.
     # "explicit route" means the sentence really said from/to. A bare place name
     # ("is the 7-Eleven open") must not be read as a route request.
     explicit_route = False
@@ -495,23 +597,21 @@ def parse_with_grammar(text: str, places: PlaceResolver) -> Slots:
 
     facility_hit = _FACILITY.search(lowered)
     item = facility_hit.group(1).lower() if facility_hit else ""
-    wants_hours = bool(_HOURS_EN.search(lowered) or _HOURS_ZH.search(lowered))
+    wants_hours = bool(_HOURS.search(lowered))
     # "the link to Core D is closed" and "the library is closed today" are reports
     # about the map; "is the canteen closed on Sunday?" and "what time does the
     # bookshop close" are questions about a timetable. Two signals separate them:
     # naming a physical link, and whether the sentence is phrased as a question.
     asked_as_question = text.strip().endswith("?")
-    closed_adjective = re.search(r"\bclosed\b", lowered) is not None
+    closed_adjective = _CLOSED_WORD.search(lowered) is not None
     if closed_adjective and (_PASSAGE.search(lowered) or not asked_as_question):
         wants_hours = False
     # "how do I get to X" outranks "is X open": a route request is never a timetable
     # request, even when the sentence happens to contain the word "open".
     asks_for_route = explicit_route
 
-    asks_for_hours = re.match(r"^(?:what time|when|is|are)\b", lowered, re.I)
-    seeks_nearest = re.match(
-        r"^(?:where|which|what|find|show|locate)\b.*?\b(?:closest|nearest)\b", lowered, re.I,
-    )
+    asks_for_hours = _ASKS_AS_HOURS.match(lowered)
+    seeks_nearest = _SEEKS_NEAREST.match(lowered)
     if wants_hours and (not asks_for_route or asks_for_hours):
         intent = "hours_query"
         origin_text = destination_text = ""   # a timetable question is not a route
@@ -541,7 +641,7 @@ def parse_with_grammar(text: str, places: PlaceResolver) -> Slots:
         closed_text=closed_text,
         item=item,
         subject=subject,
-        language="zh" if re.search(r"[\u4e00-\u9fff]", text) else "en",
+        language="zh" if _HAS_CJK.search(text) else "en",
         avoid_stairs=avoid_stairs,
         source="grammar",
     )
@@ -559,6 +659,9 @@ def _validated(slots: Slots, places: PlaceResolver) -> Slots | None:
     """
     if slots.intent not in INTENTS:
         return None
+    # A stop is optional: an unnameable one is dropped so the plain route still runs.
+    if slots.via_text and not places.resolve(slots.via_text):
+        slots.via_text = ""
     for name in ("origin_text", "destination_text"):
         phrase = getattr(slots, name)
         if not phrase:

@@ -84,8 +84,16 @@ class DensePlaceIndexTests(unittest.TestCase):
         self.assertEqual([node.id for node in index.resolve("the library")], ["L"])
 
     def test_close_scores_are_reported_as_ambiguous(self) -> None:
+        # No name evidence either way ("a quiet spot" is in no published name), so the
+        # embeddings are the only evidence and two near neighbours are a real choice.
         index, _ = make_index([(0.90, "L"), (0.88, "X")])
-        self.assertEqual([node.id for node in index.resolve("library")], ["L", "X"])
+        self.assertEqual([node.id for node in index.resolve("a quiet spot")], ["L", "X"])
+
+    def test_a_published_name_beats_embedding_neighbours(self) -> None:
+        # "library" is a word in the library's published name, so the place that merely
+        # sits closest in the embedding space is a neighbour, not an alternative.
+        index, _ = make_index([(0.90, "X"), (0.88, "L")])
+        self.assertEqual([node.id for node in index.resolve("library")], ["L"])
 
     def test_facility_inside_a_named_building_is_dropped(self) -> None:
         # The AED's own label contains the building name, so it scores alongside it.

@@ -399,6 +399,13 @@ html, body {
 .node.facility.cat-amenity-lactation circle        { fill: var(--cat-amenity-lactation); }
 .node.facility.cat-amenity-prayer circle           { fill: var(--cat-amenity-prayer); }
 .node.facility.cat-amenity-other circle            { fill: var(--cat-amenity-other); }
+.route-landmark {
+  fill: var(--ink); font-size: 9.5px; opacity: .82; letter-spacing: .01em;
+}
+.route-landmark-dot { fill: var(--route-1); stroke: var(--route-casing); stroke-width: 1.2; }
+/* Published by PolyU, but no mapped walkway reaches it. */
+.off-network-ring { fill: none; stroke: var(--muted); stroke-width: .9; stroke-dasharray: 2 1.6; }
+.off-network rect, .off-network circle { opacity: .6; }
 .node.dim { display: none; }
 .node:hover rect, .node:hover circle { fill: var(--accent); }
 .node-label {

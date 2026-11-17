@@ -188,6 +188,26 @@ export class CampusMap {
       layer.appendChild(line);
 
       if (!isChosen) return;
+      // The waypoints are bends in a walkway, so the line itself carries no names. The
+      // buildings it passes do, and they are what a person recognises on the way, so the
+      // chosen route is annotated with them.
+      (route.landmarks || []).forEach((mark) => {
+        const at = this.project(mark.lat, mark.lng);
+        // In map units, like every other mark: 4.2 is about 8 m across, which reads at
+        // campus zoom. At 1.9 the dot vanished under the route line it sits on.
+        layer.appendChild(
+          el('circle', { cx: at.x, cy: at.y, r: 4.2, class: 'route-landmark-dot' }),
+        );
+        const label = el('text', {
+          x: at.x + 5,
+          y: at.y + 10,
+          // route-label keeps it visible at every zoom: applyView() hides plain node
+          // labels when the view is wide, and a landmark you cannot see is not a landmark.
+          class: 'node-label route-label route-landmark',
+        });
+        label.textContent = mark.name;
+        layer.appendChild(label);
+      });
       route.path.forEach((point, i) => {
         const xy = dots[i];
         layer.appendChild(
@@ -566,6 +586,14 @@ export class CampusMap {
               }),
             );
           }
+        }
+        // A place no walkway reaches is still on the campus, so it is drawn -- with a
+        // dashed ring, because it cannot be routed to.
+        if (node.off_network) {
+          g.classList.add('off-network');
+          g.appendChild(
+            el('circle', { cx: p.x, cy: p.y, r: size * 1.5, class: 'off-network-ring' }),
+          );
         }
         g.appendChild(
           el('rect', {

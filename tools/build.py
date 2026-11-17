@@ -431,6 +431,7 @@ def build_graph(node_features: list[dict], path_features: list[dict],
     attached: dict[tuple[float, float], list[dict]] = {}
     problems = []
     unjoined: list[str] = []
+    unjoined_places: list[tuple[dict, float]] = []
     indoor: list[dict] = []
     for place in places:
         if place.get("parent") and place["kind"] in ("facility", "place"):
@@ -450,6 +451,7 @@ def build_graph(node_features: list[dict], path_features: list[dict],
                 unjoined.append(
                     f"{place['id']} ({str(place.get('name') or 'unnamed')[:36]}) "
                     f"{best_d:.1f} m from the nearest vertex")
+                unjoined_places.append((place, best_d))
             continue
         if best_d > ATTACH_M:
             if str(place.get("source") or "") == "campus-map" or best_d > OFF_NETWORK_M:
@@ -552,6 +554,15 @@ def build_graph(node_features: list[dict], path_features: list[dict],
                          [place["lat"], place["lng"]]],
             })
 
+    # A place PolyU publishes that no drawn walkway reaches is still part of the campus.
+    # It goes into the graph marked off_network: the map draws it, and a route request is
+    # refused with the reason. Dropping it made the map look complete when it was not.
+    for place, distance in unjoined_places:
+        node = dict(place)
+        node["off_network"] = True
+        node["nearest_m"] = round(distance, 1)
+        nodes.append(node)
+
     edge_list = []
     for index, edge in enumerate(sorted(edges, key=lambda e: (e["u"], e["v"])), 1):
         edge["id"] = f"E{index:04d}"
@@ -590,6 +601,7 @@ def build_graph(node_features: list[dict], path_features: list[dict],
                 "places": len(places),
                 "edges": len(edge_list),
                 "indoor": len(indoor),
+                "off_network": len(unjoined_places),
                 "stairs": sum(1 for e in edge_list if e["stairs"]),
                 "covered": sum(1 for e in edge_list if e["covered"]),
             },
