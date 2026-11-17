@@ -288,9 +288,15 @@ export class CampusMap {
   // -- projection ----------------------------------------------------------
   private setupProjection(): void {
     const nodes = this.graph ? this.graph.nodes : [];
-    if (!nodes.length) return;
-    const lats = nodes.map((n) => n.lat);
-    const lngs = nodes.map((n) => n.lng);
+    const shapes = (this.graph && this.graph.footprints) || [];
+    // Frame the campus by what is drawn on it, not by every node. A handful of places
+    // PolyU publishes sit 1.6 km away (the West Kowloon campus, the halls), and letting
+    // them set the bounds shrank the buildings to a smudge in the corner. The structures
+    // are the campus; nodes only frame the view when there are no structures at all.
+    const ring = shapes.flatMap((item) => item.ring);
+    if (!nodes.length && !ring.length) return;
+    const lats = ring.length ? ring.map(([lat]) => lat) : nodes.map((n) => n.lat);
+    const lngs = ring.length ? ring.map(([, lng]) => lng) : nodes.map((n) => n.lng);
     const minLat = Math.min(...lats) - 0.0006;
     const maxLat = Math.max(...lats) + 0.0006;
     const minLng = Math.min(...lngs) - 0.0006;

@@ -715,7 +715,10 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, target.read_bytes(), ctype)
 
 
-def serve(port: int = 8000, host: str = "127.0.0.1", open_browser: bool = False) -> int:
+def serve(port: int | None = None, host: str | None = None,
+          open_browser: bool = False) -> int:
+    port = port or int(os.environ.get("PORT") or 8000)
+    host = host or os.environ.get("HOST") or ("0.0.0.0" if os.environ.get("PORT") else "127.0.0.1")
     try:
         app = App()
     except (PlaceIndexError, EmbeddingError, PineconeError) as exc:
@@ -752,8 +755,11 @@ def serve(port: int = 8000, host: str = "127.0.0.1", open_browser: bool = False)
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Serve the Campus Navigator web interface")
-    parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--host", default="127.0.0.1")
+    # A hosting platform injects PORT and expects the app on 0.0.0.0. Locally the default
+    # stays 127.0.0.1:8000, so nothing changes for the demo and a container still works.
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT") or 8000))
+    parser.add_argument("--host", default=os.environ.get("HOST") or
+                        ("0.0.0.0" if os.environ.get("PORT") else "127.0.0.1"))
     parser.add_argument("--open", action="store_true", help="open the browser once it is up")
     args = parser.parse_args(argv)
     return serve(args.port, args.host, args.open)
