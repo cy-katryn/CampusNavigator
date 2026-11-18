@@ -39,7 +39,7 @@ flowchart TB
 | orchestration | `dialogue.py` | ~1,300 | hold the journey, call the engine |
 | understanding | `agent.py`, `llm.py`, `nlu.py` | ~750 | turn a message into tool calls |
 | domain | `graph`, `search`, `kb`, `hours`, `places`, `place_index`, `lexical`, `landmarks`, `embeddings`, `pinecone` | ~2,370 | compute facts. Never speaks |
-| wording | `render`, `copy`, `format`, `local_names`, `narrate`, `replies` | ~1,150 | say it. Never computes |
+| wording | `render`, `copy`, `format`, `local_names`, `narrate`, `replies` | ~950 | say it. Never computes |
 | platform | `config`, `speech` | ~360 | settings, local Whisper |
 | | | **~6,700** | total application |
 | verification | `tests/`, `tools/replay.py` | ~1,050 | prove the above did not change |
@@ -235,9 +235,17 @@ offered — the sentence is the only record of them.
   place the resolver knows. On the agent path this is the model's decision to call
   `close(place)` at all, and `dialogue._close` still refuses a name it cannot resolve.
 
-> The agent front-end currently speaks the model's sentence directly, so the first three
-> guards do not run on that path. That is the one known correctness gap; both front-ends
-> should pass their final sentence through the same three checks.
+All of these run on the sentence the assistant is about to speak (`agent._refusals`), against
+the payloads the tools returned. A sentence that fails is **replaced by the engine's own
+sentence** -- `render.speech(reply, …)`, the same words the details panel would show -- so a
+refusal costs the phrasing, never the answer. When the model answered without calling a tool
+there is nothing to substitute: the sentence is then kept but marked *not narrated*, with the
+reason in `reply.notes`, so the transcript says what happened.
+
+There used to be a fourth layer here: a *narrator*, a second model call that re-phrased a
+`Facts` object. It was removed for the same reason `parse_with_llm` was -- the assistant now
+writes its own sentence inside the tool loop, so the narrator was unreachable, and asking the
+same model about its own answer is not a design, it is an extra bill.
 
 ## Verification
 
@@ -259,7 +267,7 @@ canteen crossing 10:30 between two runs once produced a diff no code change had 
 | `campus_nav/agent.py` | the tool-calling front-end: 7 tools, max 8 steps |
 | `campus_nav/nlu.py` | the shared vocabulary: `Slots`, `has_cjk`, `asks_for_everything`, `REOPEN` (100 lines) |
 | `campus_nav/copy.py` | every sentence the app says, keyed by language |
-| `campus_nav/render.py` | what gets said: narration, else the catalogue, else the reply's words |
+| `campus_nav/narrate.py` | the three checks a sentence must pass before it is spoken |
 | `campus_nav/format.py` | shapes with no prose: which rows, which day, what state |
 | `campus_nav/hours.py` | quote the published table, list the candidates, or say there is none |
 | `tools/build.py` | build the graph, embed the place names |
@@ -279,7 +287,7 @@ Windows otherwise lets a second process bind a live port and an old copy answers
 
 | File | What it pins |
 |---|---|
-| `test_llm_path.py` | the narration guards: language, grounded numbers, location claims |
+| `test_guards.py` | the three sentence checks: language, grounded numbers, location claims |
 | `test_agent.py` | the tool front-end: search returns real ids, `path` refuses the rest, `ask` ends the turn, a looping model is stopped |
 | `test_engine.py` | the engine driven as the tools drive it: walk time, route receipt, stops, the journey digest, closures and re-opening, facility counts, quoted-or-declined hours, day reading, and the no-model reply |
 | `test_place_index.py` | resolution in both modes: the name-evidence gate, one answer per name, the lexical band |

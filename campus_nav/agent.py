@@ -37,6 +37,7 @@ from .pinecone import PineconeError
 from .place_index import PlaceIndexError
 from .places import amenity_in_text
 from .replies import Reply
+from . import render
 
 # One turn may search, ask or plan a few times, but never unboundedly: a model that loops
 # on search() must not turn one message into an invoice.
@@ -232,50 +233,51 @@ class MapAgent:
         if self._question:
             return Reply(self._question, slots=slots, spoken=self._question)
         base = self._reply
-        spoken, refused = self._checked(final, base)
+        refused = self._refusals(final)
         if base is None:
-            if not spoken:
+            if not final:
                 return None
-            reply = Reply(spoken, slots=slots, spoken=spoken,
-                          narrated=True, notes=list(refused))
-            return reply
+            # Nothing from the engine to fall back on (the model answered without a tool).
+            # The sentence is kept but not trusted: it is not marked narrated, and the review
+            # note says what was wrong with it.
+            return Reply(final, slots=slots, spoken=final,
+                         narrated=not refused, notes=list(refused))
         reply = Reply(
             base.text,
             route=base.route,
             slots=slots,
             notes=list(base.notes) + list(refused),
-            narrated=bool(spoken),
             facilities=list(base.facilities),
             routes=list(base.routes),
-            spoken=spoken,
             lead_prefix=base.lead_prefix,
             facility_result=base.facility_result,
         )
-        if spoken:
+        if refused:
+            # The engine's own sentence, in the language asked for -- the same words the
+            # details panel would show. A refusal costs the phrasing, never the answer.
+            reply.spoken = render.speech(reply, self.dialogue.graph,
+                                         self.dialogue.display_language)
+        elif final:
+            reply.spoken = final
+            reply.narrated = True
             reply.notes.append("the model chose the steps; the engine supplied every number")
         return reply
 
-    def _checked(self, final: str, base: Reply | None) -> tuple[str, list[str]]:
-        """The sentence to speak, and any note about why it is not the model's own.
+    def _refusals(self, final: str) -> list[str]:
+        """Why the assistant's sentence may not be spoken, or nothing when it may.
 
         Three checks, on the sentence itself: the language asked for, numbers that came out
-        of a tool result, and no claim about where the user is. A sentence that fails them is
-        replaced by the engine's own rendering -- the same server-side text the map and the
-        details panel use -- so a refusal costs the phrasing, never the answer.
+        of a tool result, and no claim about where the user is.
         """
         if not final:
-            return "", []
+            return []
         reasons = narrate.problems(
             final,
             self._payloads,
             self.dialogue.display_language,
             location_known=bool(self.dialogue.state.origin),
         )
-        if not reasons:
-            return final, []
-        fallback = (base.spoken if base is not None else "") or (
-            base.text.split("\n")[0] if base is not None else "")
-        return fallback.strip(), [f"sentence refused ({'; '.join(reasons)})"]
+        return [f"sentence refused ({'; '.join(reasons)})"] if reasons else []
 
     def _slots(self) -> Slots:
         return Slots(intent=self._intent, source="agent")

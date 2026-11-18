@@ -130,10 +130,20 @@ class AgentTests(unittest.TestCase):
         self.assertIn("128", reply.spoken, "the engine's own distance was not used")
 
     def test_a_sentence_in_the_wrong_language_is_replaced(self) -> None:
+        # With engine text to fall back on, the sentence is replaced by the engine's own.
+        client = ScriptedClient([[_call("facilities", item="toilet")]],
+                               text="The nearest toilet is in Core P.")
+        reply = self.talk(client).handle("邊度有洗手間？", language="zh-HK")
+        self.assertNotIn("The nearest toilet", reply.spoken)
+        self.assertTrue(any("sentence refused" in note for note in reply.notes), reply.notes)
+
+    def test_a_refused_sentence_with_nothing_to_fall_back_on_is_flagged_not_trusted(self) -> None:
+        # A search-only answer has no engine sentence to substitute, so the model's words are
+        # kept but not trusted: the reply is not marked narrated and the note says why.
         client = ScriptedClient([[_call("search", name="圖書館")]],
                                text="The library is Block L.")
         reply = self.talk(client).handle("圖書館喺邊？", language="zh-HK")
-        self.assertNotIn("The library is Block L", reply.spoken)
+        self.assertFalse(getattr(reply, "narrated", False))
         self.assertTrue(any("sentence refused" in note for note in reply.notes), reply.notes)
 
 
