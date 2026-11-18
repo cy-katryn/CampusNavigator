@@ -27,10 +27,8 @@ from .places import label_key as _key
 # These generic labels come from the graph builder. Proper names come from the
 # campus map's language fields or OSM's name:zh, never brand/operator aliases.
 _LABELS = {
-    "Entrance": ("入口", "入口"), "Main Entrance": ("正門", "正门"),
-    "East Entrance": ("東入口", "东入口"), "West Entrance": ("西入口", "西入口"),
-    "Side Entrance": ("側門", "侧门"), "Service Entrance": ("服務入口", "服务入口"),
-    "Stair Entrance": ("樓梯入口", "楼梯入口"), "Emergency Exit": ("緊急出口", "紧急出口"),
+    # Doorway labels are not here: the builder no longer produces them (the map has no
+    # doors), so nothing can arrive needing an "Entrance" translation.
     "Car Park Entrance": ("停車場入口", "停车场入口"), "Lift": ("升降機", "电梯"),
     "Toilet": ("洗手間", "洗手间"), "Water Station": ("飲水機", "饮水机"),
     "Security Office": ("保安室", "保安室"), "Flagpole": ("旗桿", "旗杆"),
@@ -130,7 +128,7 @@ def building_name(graph: CampusGraph, label: str, lang: str) -> str:
 
 
 def place_name(graph: CampusGraph, node_id: str, lang: str) -> str:
-    """Render the actual endpoint or facility, including the particular entrance."""
+    """Render the actual endpoint or facility, not the building it stands in."""
     node = graph.nodes.get(node_id)
     if node is None:
         return node_id

@@ -41,16 +41,6 @@ OFF_NETWORK_M = 400.0   # beyond this it is another campus, not a drawing mistak
 
 NAME_FIELDS = ("name:en", "name", "official_name", "addr:housename", "brand", "operator")
 
-ENTRANCE_LABELS = {
-    "main": "Main Entrance",
-    "yes": "Entrance",
-    "secondary": "Side Entrance",
-    "service": "Service Entrance",
-    "emergency": "Emergency Exit",
-    "exit": "Exit",
-    "staircase": "Stair Entrance",
-}
-
 OSM_SERVICE = {
     "amenity=toilets": "Toilet",
     "amenity=drinking_water": "Water Station",
@@ -140,7 +130,7 @@ def osm_name(props: dict) -> str:
 
 def describe_tags(props: dict) -> str:
     """The one tag that says what this thing is, for a message."""
-    for field in ("amenity", "shop", "entrance", "healthcare", "office", "leisure",
+    for field in ("amenity", "shop", "healthcare", "office", "leisure",
                   "tourism", "railway", "highway", "building", "man_made", "barrier"):
         if props.get(field):
             return f"{field}={props[field]}"
@@ -152,12 +142,15 @@ def place_from_feature(feature: dict) -> dict:
 
     Two conventions are accepted: the app's own properties (kind / service / aliases
     / source / ref, which the PolyU extracts produced) and raw OpenStreetMap tags
-    (amenity=..., shop=..., entrance=...), which is what an Overpass export gives.
+    (amenity=..., shop=...), which is what an Overpass export gives.
+
+    Doorways are not a kind here. The graph used to have an "entrance" kind for
+    OSM's entrance=* nodes, and nothing downstream ever saw one: the map has no doors, so
+    both the nodes and the routing that looked for them were removed.
     """
     props = dict(feature.get("properties") or {})
     lng, lat = (feature["geometry"]["coordinates"] + [0, 0])[:2]
     lat, lng = round(float(lat), 6), round(float(lng), 6)
-    entrance = str(props.get("entrance") or "")
     service = str(props.get("service") or "") or osm_service(props)
     published = str(props.get("kind") or "").strip()
     campus = CAMPUS_ROLES.get(published.lower())
@@ -171,16 +164,13 @@ def place_from_feature(feature: dict) -> dict:
         service = str(props.get("amenities") or "").strip().title() or campus[1]
     elif props.get("kind"):
         kind = str(props["kind"])
-    elif entrance:
-        kind = "entrance"
     elif service:
         kind = "facility"
     else:
         kind = "place"
     name = osm_name(props)
     if not name:
-        name = service or ENTRANCE_LABELS.get(entrance, "Entrance") if kind == "entrance" \
-            else (service or "Unnamed place")
+        name = service or "Unnamed place"
 
     name_zh = str(props.get("name:zh-Hant") or props.get("name:zh") or "").strip()
     name_zh_cn = str(props.get("name:zh-Hans") or "").strip()
@@ -217,7 +207,7 @@ def is_decor(props: dict) -> bool:
             return True
     return not any(
         props.get(field)
-        for field in ("amenity", "shop", "entrance", "healthcare", "office", "leisure",
+        for field in ("amenity", "shop", "healthcare", "office", "leisure",
                       "tourism", "railway", "man_made", "club", "highway")
     )
 
@@ -432,11 +422,7 @@ def build_graph(node_features: list[dict], path_features: list[dict],
     problems = []
     unjoined: list[str] = []
     unjoined_places: list[tuple[dict, float]] = []
-    indoor: list[dict] = []
     for place in places:
-        if place.get("parent") and place["kind"] in ("facility", "place"):
-            indoor.append(place)
-            continue
         best, best_d = min(
             ((key, haversine_m(place["lat"], place["lng"], *coords[key])) for key in coords),
             key=lambda pair: pair[1],
@@ -539,9 +525,6 @@ def build_graph(node_features: list[dict], path_features: list[dict],
             "covered": covered, "stairs": stairs,
             "path": [[round(coords[p][0], 6), round(coords[p][1], 6)] for p in chain],
         })
-    # indoor places are nodes with no walkway edge: their route is their building's
-    for place in indoor:
-        nodes.append(dict(place))
     for key, group in attached.items():
         for place in group:
             nodes.append(dict(place))
@@ -589,8 +572,6 @@ def build_graph(node_features: list[dict], path_features: list[dict],
                 "chains of bends were contracted so a node is a junction or a place",
                 f"a place standing outside attaches to its nearest walkway vertex, "
                 f"at most {ATTACH_M} m",
-                f"{len(indoor)} place(s) stand inside a building and are reached "
-                f"through it, on the floor the source publishes",
             ],
             # The display names of the buildings places stand in, both scripts. Derived
             # here from the place names, so the app renders them without a scrape.
@@ -600,7 +581,6 @@ def build_graph(node_features: list[dict], path_features: list[dict],
                 "waypoints": len(endpoints),
                 "places": len(places),
                 "edges": len(edge_list),
-                "indoor": len(indoor),
                 "off_network": len(unjoined_places),
                 "stairs": sum(1 for e in edge_list if e["stairs"]),
                 "covered": sum(1 for e in edge_list if e["covered"]),
@@ -629,9 +609,8 @@ def connectivity_report(graph: dict) -> list[str]:
     seen: set[str] = set()
     comps: list[set[str]] = []
     for nid in coords:
-        # A place with no walkway edge at all is an indoor facility: it is reached
-        # through its building, so it is not a component of its own and must not be
-        # reported as stranded.
+        # A place with no walkway edge at all was attached nowhere, so it is not a
+        # component of its own and must not be reported as stranded.
         if nid in seen or not adj[nid]:
             continue
         stack, comp = [nid], set()

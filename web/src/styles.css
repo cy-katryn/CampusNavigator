@@ -331,14 +331,9 @@ html, body {
   stroke-linecap: butt;
 }
 /* A cheap 2.5D hint lives in the footprint layer (fp-roof); these are the schematic
-   pins that appear on top of it. There is no .node.building any more: a node's kind is
-   place, facility or entrance -- the blocks themselves are footprints. */
+   pins that appear on top of it. A node's kind is place or facility -- the blocks
+   themselves are footprints, and there are no doorway nodes. */
 .node { cursor: pointer; }
-
-.node.entrance rect {
-  fill: var(--accent); stroke: var(--on-accent);
-  stroke-width: 1.6;
-}
 /* "Main Locations" (Alumni Atrium, Amenities Centre, Campus Control Centre ...): an
    outlined block, not a filled one. Without this rule the rect had no fill at all and
    SVG paints an unstyled rect black. */

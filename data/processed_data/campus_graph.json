@@ -1,7 +1,7 @@
 {
  "meta": {
   "title": "Campus routing graph, built from authored nodes and walkways",
-  "generated_at": "2026-11-18T03:05:58+0800",
+  "generated_at": "2026-11-18T08:06:55+0800",
   "inputs": [
    "data/authored/campus_pois.geojson",
    "data/authored/campus_paths.geojson"
@@ -17,8 +17,7 @@
    "edge length = measured along the drawn walkway",
    "loose ends within 0.0 m of another walkway were joined (0)",
    "chains of bends were contracted so a node is a junction or a place",
-   "a place standing outside attaches to its nearest walkway vertex, at most 120.0 m",
-   "0 place(s) stand inside a building and are reached through it, on the floor the source publishes"
+   "a place standing outside attaches to its nearest walkway vertex, at most 120.0 m"
   ],
   "building_names": {
    "block l (pao yue-kong library)": [
@@ -167,7 +166,6 @@
    "waypoints": 260,
    "places": 329,
    "edges": 603,
-   "indoor": 0,
    "off_network": 47,
    "stairs": 29,
    "covered": 35

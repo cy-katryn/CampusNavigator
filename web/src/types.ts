@@ -1,5 +1,5 @@
 /** The role a node plays in the graph -- not how the campus map files it (see category). */
-export type NodeKind = 'place' | 'facility' | 'entrance' | 'waypoint';
+export type NodeKind = 'place' | 'facility' | 'waypoint';
 
 export interface GraphNode {
   id: string;

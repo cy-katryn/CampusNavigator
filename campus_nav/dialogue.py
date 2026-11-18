@@ -406,7 +406,7 @@ class Dialogue:
         return Reply(
             "I can find walking routes on the PolyU campus, point you to facilities "
             "(AEDs, water, accessible toilets, canteens) and quote their opening hours. "
-            "Try: \"how do I get from the entrance to the library?\" or "
+            "Try: \"how do I get from Block Y to the library?\" or "
             "\"where is the nearest AED?\"",
             slots=slots,
         )
@@ -419,7 +419,7 @@ class Dialogue:
     def _help(self) -> Reply:
         return Reply(
             "I can do three things:\n"
-            "  1. Route between campus places, e.g. \"from the entrance to the library\"\n"
+            "  1. Route between campus places, e.g. \"from Block Y to the library\"\n"
             "  2. Re-plan around closures: \"the link between Core C and Core D is closed\"\n"
             "  3. Find facilities and their opening hours: \"is the canteen open?\"\n"
             "Ask in English or Chinese. If I do not know something, I will say so.",
@@ -1015,8 +1015,8 @@ class Dialogue:
                     f"\nCompared with the previous route ({previous_total:.0f} m): "
                     f"{sign}{delta:.0f} m."
                 )
-        # Retain the requested destination for replanning. Its best door may
-        # change when a staircase is excluded or a passage closes.
+        # Retain the requested destination for replanning: the way in may change when a
+        # staircase is excluded or a passage closes.
         self.state.last_route = route
         comparison = None
         if slots.intent == "distance":
@@ -1167,13 +1167,12 @@ class Dialogue:
 
     @property
     def _default_reference(self) -> str | None:
-        """Use the published main entrance if mapped, otherwise the named Core P reference."""
-        for name in ("main entrance", "core p"):
-            for node in self.graph.nodes.values():
-                if node.name.casefold() == name:
-                    return node.id
+        """The map reference distances are measured from: Core P, or the first place if not."""
         for node in self.graph.nodes.values():
-            if node.kind == "entrance":
+            if node.name.casefold() == "core p":
+                return node.id
+        for node in self.graph.nodes.values():
+            if node.kind == "place":
                 return node.id
         return None
 

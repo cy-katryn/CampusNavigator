@@ -16,8 +16,8 @@ MAX_WAV_BYTES = 2 * SAMPLE_RATE * MAX_SECONDS + 4096  # allow space for WAV meta
 LANGUAGES = {"en-US": "en", "zh-HK": "yue", "zh-CN": "zh"}
 DEFAULT_MODEL = ".voice/models/ggml-large-v3-turbo-q5_0.bin"
 # Place names give the decoder some spelling context for mixed-language questions.
-CAMPUS_NAMES = ("Core A, Core D, Core P, Block N, Block X, Block Z, Innovation Tower, "
-                "Pao Yue-kong Library, Main Entrance.")
+CAMPUS_NAMES = ("Core A, Core D, Core P, Block N, Block V, Block X, Block Y, Block Z, "
+                "Innovation Tower, Pao Yue-kong Library.")
 PROMPT_INTROS = {
     "en-US": "PolyU campus places: ",
     "zh-HK": "理大校園地點：",

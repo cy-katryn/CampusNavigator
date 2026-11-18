@@ -24,7 +24,9 @@ const MAX_TILES = 42;
 /* Marker sizes in map units (metres on the ground), so they scale with the map like
    the buildings do. Halved from the original illustration: at 18 units a building pin
    covered most of the footprint it was pointing at. */
-const NODE_SIZE = { place: 7, entrance: 6.5 } as const;
+/* A place pin, in map units (metres on the ground). Facilities are circles of
+   SERVICE_RADIUS above; blocks are footprints, not pins. */
+const PLACE_SIZE = 7;
 const SERVICE_RADIUS = 3.5;
 
 export interface ScaleInfo {
@@ -634,8 +636,6 @@ export class CampusMap {
     this.nodes.forEach((node) => {
       // a waypoint is a junction, not a place: the end point of a link, never drawn
       if (node.kind === 'waypoint') return;
-      // an entrance, if the data ever carries one, is a place you can walk to like any
-      // other: it is drawn with the rest of the places instead of hiding behind a toggle
       const p = this.project(node.lat, node.lng);
       const g = el('g', { class: 'node ' + node.kind }) as SVGGElement;
       if (node.kind === 'facility') {
@@ -644,10 +644,9 @@ export class CampusMap {
         this.serviceGroups.push({ el: g, cat });
         g.appendChild(el('circle', { cx: p.x, cy: p.y, r: SERVICE_RADIUS }));
       } else {
-        // The kinds that reach here are "place" and "entrance" -- the blocks themselves are
-        // footprints, not nodes -- so the 2.5D shadow face and the decorative trees that
-        // the old "building" kind drew are gone with it.
-        const size = NODE_SIZE[node.kind as keyof typeof NODE_SIZE];
+        // What reaches here is a place: the blocks themselves are footprints, not nodes, and
+        // the 2.5D shadow face and decorative trees of the old "building" kind are gone.
+        const size = PLACE_SIZE;
         // A place no walkway reaches is still on the campus, so it is drawn -- with a
         // dashed ring, because it cannot be routed to.
         if (node.off_network) {

@@ -170,11 +170,7 @@ export function PlaceSearch({ nodes, onChoose }: PlaceSearchProps) {
                 />
                 <span>{hit.name}</span>
                 <span className="ml-auto whitespace-nowrap text-[11px] text-muted">
-                  {hit.kind === 'facility'
-                    ? hit.service || 'facility'
-                    : hit.kind === 'entrance'
-                      ? 'entrance'
-                      : 'place'}
+                  {hit.kind === 'facility' ? hit.service || 'facility' : 'place'}
                 </span>
               </div>
             ))

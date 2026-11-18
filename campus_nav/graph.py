@@ -48,7 +48,6 @@ class Node:
     #   waypoint  a junction of the walkway geometry: never named, never a destination
     #   place     a destination: a block, a main location
     #   facility  somewhere inside a building: a toilet, an office, an AED
-    #   entrance  a doorway, when the source publishes one
     kind: str = "place"
     # The campus map's own category, as published: "Amenities", "Main Locations",
     # "Faculties, Schools & Departments", "Administrative & Supporting Office",

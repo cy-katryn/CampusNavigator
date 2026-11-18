@@ -4,13 +4,13 @@ The problem this solves
 -----------------------
 Level A (before this file) printed a template:
 
-    Route: Main Entrance -> Core B -> ... Total: 419 m, 6 segment(s)
+    Route: Block Y (Lee Shau Kee Building) -> Core A  Total: 500 m, 1 leg
 
 Correct, but it reads like a receipt and no part of the sentence came from the model.
 Level B hands the *finished* route back to the model and asks it to phrase it:
 
-    "It's about 419 m from the main entrance - the quickest way, though the first
-     stretch is a stairway. Six short legs in all."
+    "It's about 500 m from Block Y to Core A - the quickest way, and the steps come
+     at the end."
 
 Every word comes from the API. The numbers still come from A*, because the model is
 only describing facts it was given.
