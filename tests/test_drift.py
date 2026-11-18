@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import unittest
 
-from campus_nav import copy, format as fmt, kb, local_names, nlu, places
+from campus_nav import copy, format as fmt, kb, local_names, places
 from campus_nav.config import graph_path
 from campus_nav.graph import CampusGraph
 
@@ -60,7 +60,6 @@ class TableAgreementTests(unittest.TestCase):
         reachable = {s.lower() for n in self.graph.nodes.values() if n.service
                      for s in [n.service]}
         reachable |= set(places.FACILITY_WORDS) | set(places.FACILITY_WORDS.values())
-        reachable |= set(nlu._ZH_SERVICES) | set(nlu._ZH_SERVICES.values())
         reachable.add("")
         dead = sorted(set(local_names.SERVICE_LABELS) - reachable)
         self.assertEqual(dead, [], "label entries nothing can look up")
@@ -74,15 +73,14 @@ class TableAgreementTests(unittest.TestCase):
         for key, row in copy.COPY.items():
             self.assertEqual(set(row), set(copy.LANGUAGES), f"{key} is missing a language")
 
-    def test_every_chinese_amenity_word_reaches_a_renderable_label(self) -> None:
-        for capability in nlu._ZH_SERVICES:
-            normalised = places.facility_capability(capability)
-            published = local_names.service_label(capability, "zh-HK")
-            self.assertNotEqual(published, capability,
-                                f"Chinese item {capability!r} has no label")
-            self.assertTrue(
-                places.CAPABILITY_LABELS.get(normalised) or published != capability,
-                f"{capability!r} normalises to {normalised!r}, which nothing can match")
+    def test_every_capability_has_a_published_label_and_a_chinese_name(self) -> None:
+        # The Chinese amenity table went with the grammar; these two are what remain, and a
+        # capability with no label would be spoken in English inside a Chinese answer.
+        for capability in set(places.FACILITY_WORDS.values()):
+            self.assertTrue(places.CAPABILITY_LABELS.get(capability),
+                            f"{capability!r} has no published words to join on")
+            self.assertNotEqual(local_names.service_label(capability, "zh-HK"), capability,
+                                f"{capability!r} has no Chinese label")
 
 
 class PayloadGuardTests(unittest.TestCase):

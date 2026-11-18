@@ -4,16 +4,6 @@ Two jobs:
   1. load .env by hand (no third-party package needed) and expose the settings
   2. say where the data lives, and where the one routing graph is
 
-Folder layout
--------------
-    data/raw_data/       what Overpass and the PolyU websites published, untouched
-    data/authored/       the GeoJSON you draw and edit in geojson.io
-    data/processed_data/ campus_graph.json -- built from data/authored/, read by the app
-
-One graph, no fallback. If campus_graph.json or campus_shapes.geojson is missing, the
-app stops and names the file to create. A navigator that silently routes on invented
-geometry is worse than one that refuses to start.
-
 Precedence for every setting: real environment variable > .env file > default.
 """
 from __future__ import annotations
@@ -147,8 +137,8 @@ class Settings:
         if self.llm_available and self.narrate:
             return "LLM understands and narrates (Level B), grammar fallback"
         if self.llm_available:
-            return "LLM understands, template replies (Level A)"
-        return "grammar only (no API key)"
+            return "LLM understands and narrates (Level A: no narration)"
+        return "no model configured -- the assistant cannot read questions"
 
 
 def get_settings() -> Settings:

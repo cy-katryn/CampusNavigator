@@ -85,13 +85,18 @@ CASES: list[dict] = [
 def build(live: bool) -> tuple[CampusGraph, PlaceIndex, DeepSeekClient | None]:
     graph = CampusGraph.load(graph_path())
     settings = get_settings()
-    if live:
-        index = PlaceIndex(graph, settings)
-        index.check()
-        client = DeepSeekClient(settings)
-        return graph, index, client
-    offline = Settings(api_key="", model="test", llm_enabled=False, timeout_s=1)
-    return graph, PlaceIndex(graph, offline), None
+    if not live:
+        # There is no grammar front-end any more, so an offline recording would be 25
+        # apologies. The deterministic net is the test suite (tests/test_engine.py); this
+        # tool is now for whole-turn diffs against a real model.
+        raise SystemExit(
+            "replay needs --live now: without a model every answer is the same apology.\n"
+            "The deterministic facts are pinned by tests/test_engine.py -- run pytest instead."
+        )
+    index = PlaceIndex(graph, settings)
+    index.check()
+    client = DeepSeekClient(settings)
+    return graph, index, client
 
 
 def record(graph: CampusGraph, index: PlaceIndex, client: DeepSeekClient | None,

@@ -12,6 +12,7 @@ from campus_nav import copy, render
 from campus_nav.config import Settings, graph_path
 from campus_nav.dialogue import Dialogue
 from campus_nav.graph import CampusGraph
+from campus_nav.nlu import Slots
 from campus_nav.place_index import PlaceIndex
 
 OFFLINE = Settings(api_key="", model="test", llm_enabled=False, timeout_s=1)
@@ -46,9 +47,18 @@ class RenderTests(unittest.TestCase):
         cls.graph = CampusGraph.load(graph_path())
         cls.places = PlaceIndex(cls.graph, OFFLINE)
 
-    def reply(self, text: str, lang: str = "en-US"):
-        return Dialogue(self.graph, client=None, narrator=None,
-                        places=self.places).handle(text)
+    def route_reply(self, origin: str, destination: str, lang: str = "en-US"):
+        """The engine's own reply, built the way the agent's path() tool builds it."""
+        talk = Dialogue(self.graph, client=None, narrator=None, places=self.places)
+        talk.display_language = lang
+        ids = {}
+        for role, phrase in (("origin", origin), ("destination", destination)):
+            matches = self.places.resolve(phrase)
+            self.assertEqual(len(matches), 1, phrase)
+            ids[role] = matches[0].id
+        slots = Slots(intent="route", origin_text=ids["origin"],
+                      destination_text=ids["destination"])
+        return talk._route_reply(slots)
 
     def test_an_explicit_sentence_wins(self) -> None:
         # The handler said what to read out; a summary would only contradict it.
@@ -60,10 +70,10 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(render.speech(Fake(), self.graph, "en-US"), "explicit words")
 
     def test_a_route_is_said_in_the_language_asked_for(self) -> None:
-        english = render.speech(self.reply("from Block V to the library"), self.graph, "en-US")
-        # English names inside a Chinese sentence resolve unambiguously; "圖書館" alone is
-        # three places and rightly asks a question instead of answering.
-        chinese = render.speech(self.reply("由 Block V 去 Block L 點行？"), self.graph, "zh-HK")
+        english = render.speech(self.route_reply("Block V", "library"), self.graph, "en-US")
+        chinese = render.speech(self.route_reply("Block V (Jockey Club Innovation Tower)",
+                                                 "Block L (Pao Yue-Kong Library)", "zh-HK"),
+                                self.graph, "zh-HK")
         self.assertIn("metres", english)
         self.assertIn("米", chinese)
 

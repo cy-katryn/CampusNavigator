@@ -11,16 +11,17 @@ Mandarin and Cantonese**, in text or by voice, and draws the route it recommends
 
 - **Python 3.10+**. The application is standard library only — there is nothing to `pip install`.
 - **Node 18+** only if you want to change the interface; the built bundle is committed.
-- **Three API keys**, below. The app *runs* without them, it just understands less.
+- **Three API keys**, below. `LLM_API_KEY` is **required** — there is no offline parser: without
+  a model the assistant says so instead of guessing. The other two degrade gracefully.
 
 ## Setup: the three keys
 
-Copy `.env.example` to `.env` and fill in these three. Each one switches a single layer from
-its deterministic fallback to its model-backed path — you can add them one at a time.
+Copy `.env.example` to `.env` and fill in these. Each key switches one layer to its
+model-backed path.
 
 | key | description | where to get it | without it |
 |---|---|---|---|
-| **`LLM_API_KEY`** | the tool-calling assistant: it reads any phrasing, chooses the steps and phrases the answer (`campus_nav/agent.py`). **Any OpenAI-compatible endpoint works** — this key plus `LLM_MODEL`, and `LLM_BASE_URL` if it is not DeepSeek | [DeepSeek](https://platform.deepseek.com/api_keys) (default), or your own `LLM_BASE_URL` (`https://api.openai.com/v1`, a local server, …) | the deterministic grammar understands only the phrasings it enumerates, and answers from templates |
+| **`LLM_API_KEY`** | the tool-calling assistant: it reads any phrasing, chooses the steps and phrases the answer (`campus_nav/agent.py`). **Any OpenAI-compatible endpoint works** — this key plus `LLM_MODEL`, and `LLM_BASE_URL` if it is not DeepSeek | [DeepSeek](https://platform.deepseek.com/api_keys) (default), or your own `LLM_BASE_URL` (`https://api.openai.com/v1`, a local server, …) | **required**: every reply becomes "I can't reach the language model right now" |
 | **`EMBEDDINGS_API_KEY`** | multilingual name matching: a phrase is embedded and matched against every place's published names in both scripts (`campus_nav/place_index.py`) | any OpenAI-compatible `/embeddings` endpoint; the default is Alibaba Cloud Model Studio (DashScope) | the built-in word scorer resolves names instead — exact-ish names still work, paraphrases do not |
 | **`PINECONE_API_KEY`** | the vector index that stores those 329 place vectors | [app.pinecone.io](https://app.pinecone.io) — create an index named `campus-navigator-places` | same as above: no index, no semantic matching |
 
@@ -77,15 +78,16 @@ has nothing. Each browser keeps its own conversation; the transcript survives a 
 where a misheard block code can be corrected before you send it.
 
 **Under the hood** — A*/UCS routing with an admissible Euclidean heuristic, embeddings for name
-identity, BM25 for the facts, and a deterministic twin for every layer. If the model dies
-mid-demo the grammar answers the same question from the same engine; the app never falls through
-to a guess. Details, layer map and vocabulary tables: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+identity, BM25 for the facts. The model reads the message and chooses the steps; every number,
+place id and timetable comes from the engine, and the model is given no place catalogue at all.
+If the model cannot be reached the assistant says so rather than guessing.
+Details, layer map and vocabulary tables: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## Tests
 
 ```bash
-python -m pytest tests -q                     # 140 tests + 24 subtests: no network, no keys, no server
-python tools/replay.py --diff golden.json     # 25 prompts x 3 languages: the facts must not change
+python -m pytest tests -q                          # 78 tests: no network, no keys, no server
+python tools/replay.py --live --diff golden.json    # 25 prompts x 3 languages, whole-turn diff (needs a key)
 ```
 
 ## Data

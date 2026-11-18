@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from . import copy
 from .config import RAW_DIR, get_settings
-from .format import FacilityResult, requested_day, walk_minutes
+from .format import FacilityResult, walk_minutes
 from . import lexical
 from .graph import CampusGraph, Node
 from .kb import KnowledgeBase, hours_summary, open_state, today_hours
@@ -26,9 +26,7 @@ from . import hours
 from .landmarks import landmarks_along
 from .llm import DeepSeekClient
 from .narrate import Facts, Narration, Narrator
-from .nlu import (REOPEN, Slots, asks_for_everything, facility_words, has_cjk,
-                  names_destination, parse_with_grammar, refers_to_last_distance,
-                  stair_request)
+from .nlu import REOPEN, Slots, asks_for_everything, has_cjk
 from .place_index import PlaceIndex
 from .places import (
     CAPABILITY_LABELS,
@@ -37,7 +35,6 @@ from .places import (
     facility_capability,
     human_category,
 )
-from .local_names import service_label
 from .replies import Reply
 from .search import RouteResult, compare, search
 
@@ -223,43 +220,32 @@ class Dialogue:
             self._agent = MapAgent(self)
         return self._agent
 
-    # -- public ------------------------------------------------------------
-    def _interpret_pending_place(self, text: str, slots: Slots) -> None:
-        """A bare place name answers the last question about a missing endpoint.
-
-        "Bare" is doing work here: the pending question swallows whatever arrives next, so
-        "but I want to make sure I pass through Core P on the way" was read as an answer
-        about a place called "want". A sentence that long is not a name -- it goes to the
-        parser, where a stop and a re-plan are understood.
-        """
-        if len(re.findall(r"[\w']+", text or "")) > 6:
-            return
-        if (self.state.pending and text and slots.intent in ("route", "out_of_scope")
-                and (slots.avoid_stairs is None or slots.mentions_places or self._preferred_matches(text))
-                and not slots.origin_text and not names_destination(text, self.places)):
-            if not text.rstrip().endswith(("?", "？")) or self._preferred_matches(text):
-                if self.state.pending == "origin":
-                    slots.origin_text, slots.destination_text = text, ""
-                else:
-                    slots.destination_text = text
-                slots.intent = "route"
-
     def handle(self, text: str, *, language: str | None = None) -> Reply:
         """Answer one message, and remember the exchange for the next one.
 
-        With a model configured, the model drives the turn through the tools in `agent.py`;
-        the grammar answers when there is no model, or when the model could not be reached at
-        all. The engine's state stays the authority for facts in either case.
+        The model drives every turn through the tools in `agent.py`. There is no second
+        parser: when the model cannot be reached the reply says so, because a guess dressed
+        as an answer is worse than an apology. The engine's state stays the authority for the
+        facts either way.
         """
         self._llm_ok_for_turn = self.client is not None
         agent = self.agent
         if agent is not None:
             reply = agent.handle(text, language)
             if reply is not None:
+                # Answering a question must not rub the walk off the map. A reply that
+                # carries no route of its own keeps the current one as a background option;
+                # it used to be re-attached in the intent ladder, which no longer exists.
+                if (not reply.routes and reply.route is None
+                        and self.state.last_route is not None):
+                    reply.routes = [self.state.last_route]
                 self._remember(text, reply)
                 return reply
             self._llm_ok_for_turn = False
-        reply = self._handle(text, language=language)
+        spoken = self._language(text, language)
+        self.display_language = spoken
+        reply = Reply(copy.t("speech.no_model", spoken), notes=["no model configured"],
+                      spoken=copy.t("speech.no_model", spoken))
         self._remember(text, reply)
         return reply
 
@@ -313,111 +299,6 @@ class Dialogue:
         if language in ("en-US", "zh-HK", "zh-CN"):
             return language
         return "zh-HK" if has_cjk(text) else "en-US"
-
-    def _handle(self, text: str, *, language: str | None = None) -> Reply:
-        spoken_language = self._language(text, language)
-        # The facts handed to the model carry it: the model cannot see the browser, so the
-        # engine has to say which language the answer is owed in.
-        self.display_language = spoken_language
-        if _GREETING.match(text.strip()):
-            warm = ", ".join(self._warm_examples(spoken_language))
-            return Reply(copy.t("speech.greeting", spoken_language, examples=warm),
-                         notes=["greeting"])
-        if _THANKS.match(text.strip()):
-            return Reply(copy.t("speech.thanks", spoken_language), notes=["greeting"])
-        # The agent either answered already or could not be reached: the grammar is the whole
-        # parser on this path.
-        slots = parse_with_grammar(text, self.places)
-        self._interpret_pending_place(stair_request(text)[0], slots)
-        if slots.clear_stops:
-            # "no stops", "just the direct route": drop the places added along the way and
-            # plan the walk again without them. The parser read the words; the state change
-            # is the dialogue's.
-            self.state.stops = []
-            if slots.intent == "out_of_scope":
-                slots.intent = "route"
-        intent = slots.intent
-
-        if intent == "help":
-            return self._help(spoken_language)
-        if intent == "reset":
-            self.reset()
-            return Reply(copy.t("speech.reset", spoken_language))
-
-        if slots.facility_choice is not None:
-            return self._facility_choice(slots)
-        if intent in ("facility_query", "hours_query"):
-            # The single place where a user's words become a service lookup. The model used
-            # to fill this slot from a list it was shown, and "I want to have a swim" arrived
-            # as "water station" -- a wrong answer stated confidently. Now the model reports
-            # the words and this line decides, from the map's own vocabulary.
-            if not slots.item:
-                slots.item = amenity_in_text(slots.need or slots.subject)
-            if intent == "facility_query" and slots.along_the_way:
-                # "I also want a quick breakfast along the way" is not a question about where
-                # catering is; it is an instruction about the walk in progress.
-                inserted = self._stop_for_need(slots)
-                if inserted is not None:
-                    return inserted
-            reply = self._hours(slots) if intent == "hours_query" else self._facilities(slots)
-            if reply.facility_result:
-                self.state.last_facilities = reply.facility_result
-            if reply.routes or reply.route is not None:
-                return reply
-            if self.state.last_route is not None:
-                # Answering a question must not rub out the walk on the map. The route is
-                # re-attached as a *background* option: the reply's own text is about the
-                # question, and with one option there is nothing to choose between.
-                reply.routes = [self.state.last_route]
-            return reply
-        self.state.last_facilities = None
-
-        if slots.avoid_stairs is not None:
-            self.state.avoid_stairs = slots.avoid_stairs
-
-        if intent == "close" or slots.closed_text:
-            closed_note = self._close(slots.closed_text)
-            if not (self.state.origin and self.state.destination):
-                return Reply(
-                    f"{closed_note}\nTell me your start and destination and I will check "
-                    "whether a route still exists.",
-                    slots=slots,
-                )
-            return self._route_reply(slots, prefix=closed_note)
-
-        if intent in ("route", "distance"):
-            if intent == "distance" and not slots.mentions_places and not refers_to_last_distance(text):
-                # Neither place in the new question was understood. Ask for both
-                # again rather than quietly measuring the previous pair.
-                self.state.origin = self.state.destination = None
-                self.state.last_route = None
-            return self._route_reply(slots)
-
-        # Somebody will ask about stairs, lifts or wheelchair access at Open Day. Two
-        # thirds of that answer is now known and one third is not, so say exactly
-        # which: outdoor flights of steps ARE mapped (OpenStreetMap tags them), lifts
-        # and indoor stairs are not, in any source this project can cite.
-        if _STEP_FREE.search(text):
-            return Reply(
-                "I mark flights of steps -- they are drawn as rungs on the map, and a "
-                "route that uses one says so. What I do not have is lifts or the stairs "
-                "inside a building, so I cannot promise a step-free route.\n"
-                "What I can do: find the nearest accessible toilet, water station or AED, "
-                "quote opening hours, and re-plan if you tell me a link is closed.",
-                slots=slots,
-            )
-
-        return Reply(copy.t("speech.out_of_scope", spoken_language), slots=slots)
-
-    # -- pieces ------------------------------------------------------------
-    def _warm_examples(self, language: str = "en-US") -> list[str]:
-        """Three real amenity words from this map, in the language being spoken."""
-        words = facility_words(self.graph)[:3] or ["a nearby amenity"]
-        return [service_label(word, language) for word in words]
-
-    def _help(self, language: str = "en-US") -> Reply:
-        return Reply(copy.t("speech.help", language),
-                     notes=[f"graph: {self.graph.summary()}"])
 
     def _preferred_matches(self, text: str) -> list[Node]:
         """The places a phrase names, best first, from the embedding index.
@@ -1383,68 +1264,6 @@ class Dialogue:
                 reference=self.graph.node(reference).name)).strip()
         return reply
 
-    def _facility_choice(self, slots):
-        last = self.state.last_facilities
-        index = slots.facility_choice
-        if not last or index >= len(last.rows):
-            kind = "ask_category" if (index == 0 and "最近" in slots.subject and not (last and last.rows)) else "choice_missing"
-            return Reply("Which facility do you mean?", slots=slots,
-                         facility_result=FacilityResult(kind))
-        # "the nearest from here": where the user now says they are re-ranks the list. The
-        # distances were measured from the map reference (Core P) or from where the previous
-        # walk started, and neither is where they are standing now.
-        reference = self.state.origin or last.route_origin
-        here = self._preferred_matches(slots.origin_text) if slots.origin_text else []
-        if len(here) == 1:
-            reference = here[0].id
-            self.state.origin = reference
-            if index == 0:
-                def distance(row: dict) -> float:
-                    node = self.graph.nodes.get(row.get("node_id") or "")
-                    return self.graph.node(reference).distance_to(node) if node else float("inf")
-
-                last.rows.sort(key=distance)
-                for row in last.rows:
-                    node = self.graph.nodes.get(row.get("node_id") or "")
-                    metres = self._distance_from(node, reference) if node else None
-                    if metres is not None:
-                        row["metres"] = round(metres)
-        card = last.rows[index] if index < len(last.rows) else last.rows[0]
-        node_id = card.get("node_id")
-        same_place = (
-            bool(node_id) and bool(reference)
-            and node_id in self.graph.nodes and reference in self.graph.nodes
-            and (node_id == reference
-                 or self.graph.node(reference).distance_to(self.graph.node(node_id)) < 5.0)
-        )
-        if slots.intent == "route" and same_place:
-            # "the nearest from here" when the nearest IS here: a zero-metre route is not an
-            # answer, and "you are already there" is.
-            where = ", ".join(p for p in (card.get("building"), card.get("floor")) if p)
-            return Reply(
-                f'{card["name"]} is in this building -- you are already there'
-                + (f" ({where})." if where else "."),
-                slots=slots, facilities=[card],
-                facility_result=FacilityResult("selected", last.subject, rows=[card]),
-            )
-        if slots.intent == "route" and node_id in self.graph.nodes:
-            self.state.last_facilities = None
-            slots.origin_text = ""
-            slots.destination_text = node_id
-            if reference:
-                self.state.origin = reference
-            if slots.avoid_stairs is not None:
-                self.state.avoid_stairs = slots.avoid_stairs
-            return self._route_reply(slots)
-        if slots.intent == "route":
-            return Reply("There is no mapped route to this facility.", slots=slots,
-                         facility_result=FacilityResult("no_route", rows=[card]))
-        kind = "hours" if slots.intent == "hours_query" or last.kind == "hours_options" else "selected"
-        info = FacilityResult(kind, last.subject, reference=last.reference, rows=[card],
-                              day=requested_day(slots.when or slots.subject) or last.day, route_origin=last.route_origin)
-        self.state.last_facilities = info
-        return Reply(card.get("hours_summary") or card["name"], slots=slots, facility_result=info,
-                     facilities=[card] if node_id in self.graph.nodes else [])
     def _hours(self, slots: Slots) -> Reply:
         return hours.ask(self, slots)
 

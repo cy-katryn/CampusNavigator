@@ -8,9 +8,9 @@ flowchart TB
     UI["React UI&nbsp;·&nbsp;web/src"] -->|"POST /api/chat"| WEB["web.py<br/>HTTP · session cookie · JSON payload"]
     WEB --> DLG["Dialogue.handle()<br/>orchestration · journey state"]
     DLG -->|"a model key is configured"| AGENT["agent.py<br/>the model chooses tools · max 8 steps"]
-    DLG -->|"no key · timeout · agent returned None"| GRAM["nlu.py<br/>49-pattern grammar"]
+    DLG -->|"no model reachable"| APOLOGY["copy.py<br/>'I can't reach the language model'"]
     AGENT -->|"search · ask · path · facilities · hours · close · reset"| ENG
-    GRAM -->|"the same four entry points"| ENG["engine entry points<br/>_route_reply · _facilities · _hours · _close"]
+    APOLOGY --> WEB
     ENG --> DOM
     subgraph DOM["domain — computes, never speaks"]
         direction LR
@@ -35,13 +35,14 @@ flowchart TB
 
 | layer | files | size | its one job |
 |---|---|---|---|
-| door | `web.py` | ~770 | HTTP, sessions, the JSON the browser needs |
-| orchestration | `dialogue.py` | ~1,540 | choose a front-end, hold the journey, call the engine |
-| understanding | `agent.py`, `nlu.py`, `llm.py` | ~1,360 | turn a message into tool calls, or into slots |
+| door | `web.py` | ~750 | HTTP, sessions, the JSON the browser needs |
+| orchestration | `dialogue.py` | ~1,300 | hold the journey, call the engine |
+| understanding | `agent.py`, `llm.py`, `nlu.py` | ~750 | turn a message into tool calls |
 | domain | `graph`, `search`, `kb`, `hours`, `places`, `place_index`, `lexical`, `landmarks`, `embeddings`, `pinecone` | ~2,370 | compute facts. Never speaks |
-| wording | `render`, `copy`, `format`, `local_names`, `narrate`, `replies` | ~1,140 | say it. Never computes |
-| platform | `config`, `speech` | ~320 | settings, local Whisper |
-| verification | `tests/`, `tools/replay.py` | ~1,750 | prove the above did not change |
+| wording | `render`, `copy`, `format`, `local_names`, `narrate`, `replies` | ~1,150 | say it. Never computes |
+| platform | `config`, `speech` | ~360 | settings, local Whisper |
+| | | **~6,700** | total application |
+| verification | `tests/`, `tools/replay.py` | ~1,050 | prove the above did not change |
 
 **The rule that resolves most confusion: a piece of code belongs to the layer of the question
 it must answer.** Where is this place, how far, is it reachable → domain. What did the user
@@ -66,7 +67,7 @@ POST /api/chat {"text": "邊度可以食飯？", "lang": "zh-HK"}
 ```
 
 If `agent.handle()` returns `None` (no key, timeout, dead API), `Dialogue` calls
-`nlu.parse` and the grammar front-end calls **the same four engine methods**
+the model's tools call **four engine methods**
 (`_route_reply`, `_facilities`, `_hours`, `_close`). That is why a route planned by the
 model and a route planned without one are identical.
 
@@ -117,16 +118,31 @@ English (`"library"`) is not a problem, because the building's own English name 
 | building over feature | "the library" answered with the defibrillator mounted inside it |
 | `degrade()` | a dead vector store taking the whole app with it |
 
-## Two front-ends, one engine
+## One front-end: the model
 
-| | model front-end (`agent.py`) | grammar front-end (`nlu.py`) |
-|---|---|---|
-| reads the sentence | the model | 49 patterns |
-| decides the steps | the model, via tools | an `if intent ==` ladder |
-| calls the engine | same functions | same functions |
-| when it runs | a key is configured | no key, timeout, dead API, or the agent returned nothing |
-| status | the production path | the only path with a model. `parse_with_llm()` (model returns JSON slots) was removed once the agent landed: `dialogue.handle` always reached the grammar with `client=None`, so that branch could not run. `nlu.py` is now the offline front-end only — 717 lines, down from 1,033. |
-| prose | the model's own sentence | `render` + `copy` |
+There is one way in. The model reads the message and drives the tools in `agent.py`; there is
+no second parser behind it.
+
+| | the model front-end (`agent.py`) |
+|---|---|
+| reads the sentence | the model |
+| decides the steps | the model, via tools |
+| calls the engine | `_route_reply` · `_facilities` · `_hours` · `_close` -- the same functions for every turn |
+| prose | the model's own sentence |
+| when it cannot run | the reply says the model is unreachable; it never guesses |
+
+**What used to be here, and why it went.** Two parsers preceded this: `parse_with_llm()`
+(the model returning JSON slots) and `parse_with_grammar()` (49 regexes). The first became
+unreachable once the agent landed — `dialogue.handle` always called the grammar with
+`client=None`, so it was deleted. The second was deleted deliberately: it was 413 lines of
+sentence shapes plus ~30 tests, and it existed to answer when no model was available. With it
+goes offline mode, and `nlu.py` is now **100 lines** of shared vocabulary — `Slots`,
+`has_cjk`, `asks_for_everything`, `REOPEN` — down from 1,033.
+
+What that cost, recorded once so nobody has to rediscover it: the app needs a model key; a
+dead network costs the answer rather than the phrasing; and the Chinese amenity table
+(`飯堂 → canteen`) and the closure words went with the grammar, so a Chinese amenity question
+now leans on the model naming the English service word, and on the embedding fallback.
 
 The model is given **no vocabulary**: not the 329 place names, not the 52 published services.
 Three vocabularies exist (the places; the services; the words people use for what they want)
@@ -146,7 +162,7 @@ message ──> model chooses tools ──> engine executes ──> facts go bac
 At most 8 steps per turn (`agent.MAX_STEPS`). A model that loops on `search` cannot turn one
 message into an invoice.
 
-## The seven vocabulary tables
+## The six vocabulary tables
 
 There are seven tables and three of them are called "labels". They do different jobs:
 
@@ -154,13 +170,12 @@ There are seven tables and three of them are called "labels". They do different 
 |---|---|---|---|
 | `places.FACILITY_WORDS` | user's word → **capability** | `"lunch" → canteen` | `amenity_in_text` |
 | `places.CAPABILITY_LABELS` | capability → **published words** | `canteen → ("catering", "canteen")` | `_service_matches` |
-| `nlu._ZH_SERVICES` | Chinese word → **capability** | `飯堂 → canteen` | `_chinese_facility` |
 | **`local_names.SERVICE_LABELS`** | published word **or** capability → **Chinese output** | `"Catering Outlets" → 餐飲設施` | `format.place_label`, `render.facility_speech`, the overview |
 | `copy.COPY` | message key → **sentence** in 3 languages | `speech.greeting` | `copy.t` |
 | `local_names._BUILDING_LABELS` | a name the map never publishes → translation | `Wing QT → QT翼` | `building_name` |
 | `format.DAYS` / `kb._DAYS` / `_DAY_NAMES` | day key ↔ weekday | `Tue` | `requested_day`, `timetable` |
 
-Mnemonic: `FACILITY_WORDS` and `_ZH_SERVICES` translate *user → engine*;
+Mnemonic: `FACILITY_WORDS` translates *user → engine*;
 `CAPABILITY_LABELS` translates *engine → map*; `SERVICE_LABELS` and `copy` translate
 *engine → user*.
 
@@ -175,7 +190,7 @@ Each layer has a deterministic twin, so a missing key costs coverage, never the 
 
 | layer | primary | fallback | without it |
 |---|---|---|---|
-| conversation | tool-calling assistant (`agent.py`) | grammar (`nlu.parse_with_grammar`) | fewer phrasings understood |
+| conversation | tool-calling assistant (`agent.py`) | **none** | the reply says the model is unreachable; it never guesses |
 | name identity | embeddings + vector index (`place_index.py`) | built-in word scorer (`lexical.py`) | exact-ish names still resolve; no paraphrases |
 | facts | BM25 over 561 campus-map records (`kb.py`) | — always local | — |
 | routing | A* and UCS over the walkway graph (`search.py`) | — always local | — |
@@ -228,8 +243,9 @@ offered — the sentence is the only record of them.
 
 | net | what it proves | how |
 |---|---|---|
-| `pytest tests -q` | 140 tests + 24 subtests, no network, no keys, no server | unit |
-| `tools/replay.py --diff golden.json` | 25 fixed prompts × 3 languages: the **facts** of every answer are unchanged (timings stripped, clock pinned) | golden diff |
+| `pytest tests -q` | 78 tests, no network, no keys, no server | unit |
+| `tests/test_engine.py` | the deterministic net: routes, stops, closures, facilities, hours and the journey digest, all measured by the engine | unit, no model |
+| `tools/replay.py --live --diff golden.json` | 25 fixed prompts × 3 languages against a real model: whole-turn diffs | golden diff, needs a key |
 | facility net | 26 facility questions × 3 languages: summary and detail panel unchanged | golden diff |
 
 `replay.py` pins the clock (`CAMPUS_NAV_NOW`, see `kb.clock`): answers say "open now", and a
@@ -241,13 +257,13 @@ canteen crossing 10:30 between two runs once produced a diff no code change had 
 |---|---|
 | `campus_nav/` | the application (see the layer table above) |
 | `campus_nav/agent.py` | the tool-calling front-end: 7 tools, max 8 steps |
-| `campus_nav/nlu.py` | the grammar front-end and the shared `Slots` contract |
+| `campus_nav/nlu.py` | the shared vocabulary: `Slots`, `has_cjk`, `asks_for_everything`, `REOPEN` (100 lines) |
 | `campus_nav/copy.py` | every sentence the app says, keyed by language |
 | `campus_nav/render.py` | what gets said: narration, else the catalogue, else the reply's words |
 | `campus_nav/format.py` | shapes with no prose: which rows, which day, what state |
 | `campus_nav/hours.py` | quote the published table, list the candidates, or say there is none |
 | `tools/build.py` | build the graph, embed the place names |
-| `tools/replay.py` | the refactoring net |
+| `tools/replay.py` | whole-turn diffs against a live model (`--live` only) |
 | `tools/setup_voice.py` | install whisper.cpp + the multilingual model |
 | `web/` | React 18 + TypeScript + Tailwind, built by Vite into `campus_nav/static/` |
 | `data/authored/` | the GeoJSON you draw and edit |
@@ -263,13 +279,11 @@ Windows otherwise lets a second process bind a live port and an old copy answers
 
 | File | What it pins |
 |---|---|
-| `test_nlu_grammar.py` | the grammar's phrasings, one sentence per rule, and the intent arbitration order |
 | `test_llm_path.py` | the narration guards: language, grounded numbers, location claims |
 | `test_agent.py` | the tool front-end: search returns real ids, `path` refuses the rest, `ask` ends the turn, a looping model is stopped |
-| `test_dialogue.py` | walk time, ambiguous closures, close-then-re-open, greetings, "did you mean", naming, days |
+| `test_engine.py` | the engine driven as the tools drive it: walk time, route receipt, stops, the journey digest, closures and re-opening, facility counts, quoted-or-declined hours, day reading, and the no-model reply |
 | `test_place_index.py` | resolution in both modes: the name-evidence gate, one answer per name, the lexical band |
 | `test_render.py` | the catalogue and renderer: every message in every language, unknown key is a bug |
-| `test_robustness.py` | properties written *after* the fixes: filler names no place, a preposition is not a route, a trailing stop is a stop |
 | `test_cjk_names.py` | Chinese name evidence: head-final matching inside a bracket, place before facility |
 | `test_landmarks.py` | landmarks along a route: the 20 m band, order, cap, buildings only |
 | `test_off_network.py` | published-but-unreachable places stay in the graph and are refused in words |
@@ -284,9 +298,14 @@ Windows otherwise lets a second process bind a live port and an old copy answers
   reply gives the floor, not a corridor. Lifts and internal stairs are not modelled.
 - **The walkway network has gaps.** Footways passing metres apart without a shared node force
   detours; a place more than 120 m from any walkway is attached by one straight connector.
-- **The fallbacks are weaker than the models they replace.** Without a model the app
-  understands only phrasings the grammar enumerates; without the vector index a place must be
-  named roughly as the map publishes it. Both are reported rather than silently degrading.
+- **There is no offline mode.** The grammar parser was removed deliberately, so a missing key
+  or a dead network costs the answer: the reply says the model is unreachable. The vector index
+  still has its offline twin (`lexical.py`), but that only affects how well a *name* resolves,
+  not whether the sentence is understood at all.
+- **Two things went with the grammar and now depend on the model**: the Chinese amenity table
+  (`飯堂 → canteen`) and the closure words (`封咗`, `關閉`). A Chinese amenity question therefore
+  relies on the model naming the English service word, and falls back to the embedding search
+  when it does not.
 - **Alternatives on a stop journey can be a metre apart** — they differ in steps and side of
   building, which the reply prints.
 - **A vague wish returns closest matches, not a category.** "Somewhere quiet to study" can

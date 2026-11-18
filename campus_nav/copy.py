@@ -32,6 +32,13 @@ COPY: dict[str, dict[str, str]] = {
         "zh-HK": "距離係由{reference}起計——同我講你喺邊，我會按你嘅位置重新排序。",
         "zh-CN": "距离从{reference}起算——告诉我你在哪里，我会按你的位置重新排序。",
     },
+    # There is no parser without a model any more, so this is the whole offline answer.
+    "speech.no_model": {
+        "en-US": "I can't reach the language model right now, so I can't read your question. "
+                 "Check the API key and the network, then ask me again.",
+        "zh-HK": "而家連唔到語言模型，所以讀唔到你嘅問題。請檢查 API key 同網絡，再問我一次。",
+        "zh-CN": "现在连接不上语言模型，所以读不了你的问题。请检查 API key 和网络，再问我一次。",
+    },
     "speech.thanks": {
         "en-US": "Any time. Where next?",
         "zh-HK": "唔使客氣。跟住想去邊？",
