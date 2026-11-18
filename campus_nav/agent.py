@@ -43,6 +43,16 @@ from . import render
 # on search() must not turn one message into an invoice.
 MAX_STEPS = 8
 
+# The words that mean "route me around the steps", in both scripts. The model may miss this
+# (observed: "step-free please" was answered with a route containing stairs, and a claim that
+# no step-free route exists), so the engine reads the user's own words as well.
+_STEP_FREE = re.compile(
+    r"step[- ]?free|stair[- ]?free|no (?:mapped )?stairs?|without (?:the )?stairs?|"
+    r"avoid (?:the )?(?:stairs|steps)|accessible route|wheelchair|mobility aid|"
+    r"輪椅|傷健|唔使.*樓梯|不用.*樓梯|不要.*樓梯|無樓梯|無障礙|无障碍|避開.*樓梯|避开.*楼梯",
+    re.IGNORECASE,
+)
+
 _LANGUAGES = {
     "en-US": "English",
     "zh-HK": "Cantonese (Traditional Chinese)",
@@ -65,7 +75,10 @@ Rules:
 2. If search() returns several plausible places and the message does not pick one, call ask() with one question that names them. If the user is answering an earlier question, the conversation above says which candidates were offered: a distinguishing word ("forest", "staff") means the candidate whose name contains it. Never guess between candidates.
 3. When both endpoints are known, call path() and then answer with what it returned. The app draws the route and the details; you write one or two short sentences.
 4. The CURRENT JOURNEY state below is authoritative for "from here", "the nearest one" and "the way back". Do not ask for a place it already gives you.
-5. Answer in {language}. Never mention tools, tool results, ids or JSON to the user."""
+5. If the user asks for a step-free route, or mentions a wheelchair, stairs or steps, call
+   path() with avoid_stairs true. Never say a step-free route does not exist unless a path()
+   call with avoid_stairs true returned reachable false.
+6. Answer in {language}. Never mention tools, tool results, ids or JSON to the user."""
 
 
 def _tool(name: str, description: str, properties: dict, required: list[str]) -> dict:
@@ -172,6 +185,7 @@ class MapAgent:
         self._question = ""
         self._intent = "out_of_scope"
         self._payloads: list = []      # every tool result, for the sentence checks
+        self._text = ""                # the user's own words, for the engine's own readings
 
     # -- public ------------------------------------------------------------
     def handle(self, text: str, language: str | None = None) -> Reply | None:
@@ -182,6 +196,7 @@ class MapAgent:
             return None
 
         self._reply, self._question, self._intent = None, "", "out_of_scope"
+        self._text = text
         language = dialogue._language(text, language)
         dialogue.display_language = language
 
@@ -355,8 +370,17 @@ class MapAgent:
 
         slots = Slots(intent="route", origin_text=src, destination_text=dest, vias=via)
         avoid = args.get("avoid_stairs")
+        # The user's own words outrank the model's choice: "step-free please" was answered
+        # with avoid_stairs false, and then the sentence claimed no step-free route existed.
+        # A message with no such wording leaves the flag alone (None keeps the preference),
+        # so a plain "how do I get to X" does not silently clear an earlier request.
+        if _STEP_FREE.search(self._text):
+            avoid = True
         if isinstance(avoid, bool):
+            # The router reads the *state*, not the slots: writing only slots.avoid_stairs
+            # left this argument inert, so "step-free" never changed the search.
             slots.avoid_stairs = avoid
+            self.dialogue.state.avoid_stairs = avoid
         self.dialogue.state.pending = None
         reply = self.dialogue._route_reply(slots)
         self._keep(reply, "route")

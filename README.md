@@ -63,7 +63,7 @@ is it about 400 metres from Block V to the library?  -> "not quite — it's 206 
 邊度有洗手間？                                     -> Cantonese
 ```
 
-## What it does
+## Features
 
 **Map** — extruded buildings in PolyU red over the walkway network, squares and lawns painted
 flat, facility pins on top. Up to three routes are drawn at once, the chosen one solid, with

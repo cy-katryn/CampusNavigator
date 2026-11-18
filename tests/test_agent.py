@@ -137,6 +137,22 @@ class AgentTests(unittest.TestCase):
         self.assertNotIn("The nearest toilet", reply.spoken)
         self.assertTrue(any("sentence refused" in note for note in reply.notes), reply.notes)
 
+    def test_step_free_wording_reaches_the_router(self) -> None:
+        # The tool's avoid_stairs argument used to write only the slots, and the router reads
+        # state.avoid_stairs -- so "step-free please" routed through the steps and the model
+        # then claimed no step-free route existed. The user's own words now set the state.
+        library = self.places.resolve("Pao Yue-Kong Library")[0].id
+        block_x = self.places.resolve("Block X")[0].id
+        client = ScriptedClient([[_call("path", src=block_x, dest=library, avoid_stairs=False)]],
+                                text="Here is the route.")
+        talk = self.talk(client)
+        talk.handle("from Block X to the library, step-free please", language="en-US")
+        self.assertTrue(talk.state.avoid_stairs, "the user's words did not reach the router")
+        route = talk.state.last_route
+        self.assertIsNotNone(route)
+        self.assertEqual(sum(1 for segment in route.segments if segment.stairs), 0,
+                         "a step-free request still routed through steps")
+
     def test_a_refused_sentence_with_nothing_to_fall_back_on_is_flagged_not_trusted(self) -> None:
         # A search-only answer has no engine sentence to substitute, so the model's words are
         # kept but not trusted: the reply is not marked narrated and the note says why.

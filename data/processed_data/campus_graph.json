@@ -1,7 +1,7 @@
 {
  "meta": {
   "title": "Campus routing graph, built from authored nodes and walkways",
-  "generated_at": "2026-11-18T08:06:55+0800",
+  "generated_at": "2026-11-18T20:14:16+0800",
   "inputs": [
    "data/authored/campus_pois.geojson",
    "data/authored/campus_paths.geojson"
@@ -167,7 +167,7 @@
    "places": 329,
    "edges": 603,
    "off_network": 47,
-   "stairs": 29,
+   "stairs": 27,
    "covered": 35
   }
  },
@@ -16873,7 +16873,7 @@
    "metres": 9.3,
    "open": true,
    "covered": false,
-   "stairs": true,
+   "stairs": false,
    "path": [
     [
      22.305264,
@@ -17154,7 +17154,7 @@
    "metres": 33.4,
    "open": true,
    "covered": false,
-   "stairs": true,
+   "stairs": false,
    "path": [
     [
      22.305338,
