@@ -361,6 +361,13 @@ def spoken_summary(reply, graph: CampusGraph, lang: str = "en-US") -> str:
     return short[:320]
 
 
+def _parser_label(slots) -> str:
+    """'llm', or 'grammar (model abstained)' and friends: which layer decided, and why."""
+    source = getattr(slots, "source", "") or ""
+    note = (getattr(slots, "parse_note", "") or "").strip()
+    return f"{source} ({note})" if source and note else source
+
+
 def chat_payload(graph: CampusGraph, reply, lang: str = "en-US") -> dict:
     clarification = getattr(reply, "clarification", None)
     route = getattr(reply, "route", None)
@@ -401,8 +408,9 @@ def chat_payload(graph: CampusGraph, reply, lang: str = "en-US") -> dict:
         "narrated": bool(getattr(reply, "narrated", False)),
         "notes": list(getattr(reply, "notes", []) or []),
         "intent": getattr(getattr(reply, "slots", None), "intent", ""),
-        # which NLU implementation produced these slots: "llm" or "grammar"
-        "parser": getattr(getattr(reply, "slots", None), "source", ""),
+        # which NLU implementation produced these slots, and -- when it was the grammar --
+        # why the model was not the one answering
+        "parser": _parser_label(getattr(reply, "slots", None)),
         "route": route_payload(graph, route, speech_lang),
         "routes": [
             option
@@ -731,8 +739,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "status": status, "env": str(ENV_PATH.name)})
         if path == "/api/reset":
             with LOCK:
-                dialogue = self.app.dialogue_for(self._session())
-                dialogue.state = type(dialogue.state)()
+                # state *and* history: clearing one left the parser able to read a
+                # conversation the user had just erased
+                self.app.dialogue_for(self._session()).reset()
             return self._json({"ok": True})
         return self._json({"error": "not found"}, 404)
 

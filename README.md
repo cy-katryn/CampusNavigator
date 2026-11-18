@@ -58,6 +58,23 @@ choose from it, so any need without a label got the nearest wrong one — "I wan
 swim" became *water station*, confidently. It is not that the model is weak: it was asked a
 question whose answer requires the campus, and it cannot see the campus.
 
+### What the conversation remembers, and for how long
+
+Three separate stores, each with a different job and a different lifetime:
+
+| store | holds | lives in | cleared by |
+|---|---|---|---|
+| `SessionState` | origin, destination, stops, closures, stair preference, last list | the server, one per browser cookie (32 at most; the oldest browser is dropped first) | "Clear", "reset", or the browser evicting |
+| parser history | the last 6 messages (3 exchanges, 400 chars each) | the same server-side object, trimmed on every turn | the same |
+| transcript | the visible conversation | that browser's `localStorage`, versioned | the Clear button, or the error panel |
+
+The parser window is deliberately short, and it is *not* the memory: the journey travels as
+a one-line system message built from `SessionState` on every turn ("CURRENT JOURNEY … origin
+Block V; destination the library; stops in order: Core P"). That is a fact rather than prose,
+so it survives a long aside without the conversation window having to grow, and the model may
+repeat those endpoints but never invent one. Resetting clears the state *and* the history —
+clearing only the state once left the parser able to read a conversation the user had erased.
+
 Three rules make this safe rather than optimistic. They are code, not prompt text, because
 a prompt can be ignored and these cannot.
 
@@ -85,8 +102,10 @@ a prompt can be ignored and these cannot.
   stop clause at either end of the sentence becomes the stop (`via`, `stop at`, `pass
   through`, with "on the way" cut off it); a specific rule beats an incidental name mention,
   so "what facilities are there" is a request for the list and not a walk to a cleanroom
-  called "… Facility"; and English plurals fold to the published singular ("toilets" →
-  "Toilet (Block V)"). `tests/test_robustness.py` exists to keep them properties rather
+  called "… Facility"; English plurals fold to the published singular ("toilets" →
+  "Toilet (Block V)"); and the grammar asks the engine's amenity table when its own short
+  word list misses — "lunch" is catering, "sick" is a clinic — so a need is understood with
+  or without the model. `tests/test_robustness.py` exists to keep them properties rather
   than patches.
 - **A closure must have been said.** Closing a place blocks every route through it, so a
   closure is kept only when the message contains closure words (both scripts) and names the
@@ -259,7 +278,7 @@ than inventing a route. To change the map: edit a GeoJSON in `data/authored/`, r
 ## Tests
 
 ```bash
-python -m pytest tests -q      # 89 tests + 24 subtests: no network, no keys, no server
+python -m pytest tests -q      # 91 tests + 24 subtests: no network, no keys, no server
 ```
 
 | File | What it pins |

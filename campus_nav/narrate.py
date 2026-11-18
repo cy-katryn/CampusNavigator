@@ -46,6 +46,11 @@ Hard rules:
 - Use only the place names that appear in the JSON.
 - If "reachable" is false, say clearly that no route exists and mention the single most
   relevant restriction, then stop. Do not promise a route.
+- When "kind" is "places", the answer is a *place*, not a journey: "asked_for" is what the
+  user wants, "nearest" describes the one place you should name (name, building, floor,
+  metres, hours, whether it is open), and "matches" is how many the map carries. Say which
+  place it is and how far; mention the count if it is greater than one. Do not describe a
+  route and do not list the others.
 - "walk_minutes", when present, is how long the walk takes at an easy pace; you may say it.
 - If a field is absent, do not talk about it.
 - No lists, no headings, no markdown. Just the sentence(s).
@@ -56,7 +61,7 @@ Hard rules:
 class Facts:
     """Everything the model is allowed to talk about. Built from the computed route."""
 
-    kind: str                                  # "route" | "no_route"
+    kind: str                                  # "route" | "no_route" | "places"
     origin: str
     destination: str
     reachable: bool
@@ -69,6 +74,12 @@ class Facts:
     blocking: list[str] = field(default_factory=list)
     options: list[str] = field(default_factory=list)
     option_metres: list[float] = field(default_factory=list)
+    # A list of places ("where can I get lunch"): what was asked for, how many the map
+    # carries, and the one the engine picked out, with the facts about it.
+    need: str = ""
+    match_count: int | None = None
+    best: dict = field(default_factory=dict)
+    reference: str = ""                   # where the distances were measured from
 
     # -- what the model sees ------------------------------------------------
     def as_prompt_json(self) -> dict:
@@ -92,6 +103,16 @@ class Facts:
             payload["options"] = self.options
         if self.constraints:
             payload["constraints"] = self.constraints
+        if self.kind == "places":
+            # No "from"/"to": this answer is about a kind of place, not a journey.
+            payload.pop("from", None)
+            payload.pop("to", None)
+            payload.pop("reachable", None)
+            payload["asked_for"] = self.need
+            payload["matches"] = self.match_count
+            payload["nearest"] = self.best
+            if self.reference:
+                payload["measured_from"] = self.reference
         return payload
 
     # -- what the model is allowed to say -----------------------------------
@@ -108,6 +129,10 @@ class Facts:
         add(self.total_metres)
         add(self.previous_metres)
         add(self.walk_minutes)
+        add(self.match_count)
+        add(self.best.get("metres"))
+        if self.best.get("metres") is not None and self.best.get("metres") == 0:
+            add(0.0)
         if self.total_metres is not None and self.previous_metres is not None:
             add(abs(self.total_metres - self.previous_metres))
         for metres in self.segment_metres:

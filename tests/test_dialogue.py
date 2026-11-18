@@ -10,7 +10,8 @@ import unittest
 
 from campus_nav.config import Settings, graph_path
 from campus_nav import dialogue as dialogue_module
-from campus_nav.dialogue import Dialogue, place_legs, walk_minutes
+from campus_nav.dialogue import HISTORY_TURNS, Dialogue, place_legs, walk_minutes
+from campus_nav.facility_speech import FacilityResult
 from campus_nav.nlu import Slots
 from campus_nav.graph import CampusGraph
 from campus_nav.place_index import PlaceIndex
@@ -175,6 +176,48 @@ class StopRoutingTests(unittest.TestCase):
         self.assertEqual(len(routes), 1)
         self.assertFalse(routes[0].reachable)
 
+class MemoryLifecycleTests(unittest.TestCase):
+    """What the conversation remembers, for how long, and what forgets it."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.graph = CampusGraph.load(graph_path())
+        cls.places = PlaceIndex(cls.graph, OFFLINE)
+
+    def dialogue(self) -> Dialogue:
+        return Dialogue(self.graph, client=None, narrator=None, places=self.places)
+
+    def test_the_history_is_trimmed_to_its_cap(self) -> None:
+        talk = self.dialogue()
+        for _ in range(6):
+            talk.handle("how do I get from Block V to the library?")
+        self.assertEqual(len(talk.history), HISTORY_TURNS)
+        self.assertEqual(len(talk.history) % 2, 0, "whole exchanges, not half of one")
+
+    def test_reset_forgets_the_history_as_well_as_the_state(self) -> None:
+        # Clearing one left the parser able to read a conversation the user had erased.
+        talk = self.dialogue()
+        talk.handle("how do I get from Block V to the library?")
+        self.assertTrue(talk.history)
+        talk.reset()
+        self.assertEqual(talk.history, [])
+        self.assertIsNone(talk.state.origin)
+
+    def test_the_journey_survives_as_a_state_line_not_a_transcript(self) -> None:
+        # Six messages cannot carry a journey through a long aside; the state can, and it is
+        # a fact rather than prose, so it is handed over separately.
+        talk = self.dialogue()
+        talk.handle("how do I get from Block V to the library?")
+        digest = talk._context_digest()
+        self.assertIsNotNone(digest)
+        self.assertIn("CURRENT JOURNEY", digest["content"])
+        self.assertIn("Block V", digest["content"])
+        self.assertEqual(digest["role"], "system")
+
+    def test_a_fresh_conversation_has_no_state_line(self) -> None:
+        self.assertIsNone(self.dialogue()._context_digest())
+
+
 class JourneyStopsTests(unittest.TestCase):
     """Stops that persist across turns, and a stop found by description."""
 
@@ -249,6 +292,60 @@ class JourneyStopsTests(unittest.TestCase):
         reply = talk.handle("where is the nearest AED?")
         self.assertIsNone(reply.route, "a facility answer is not itself a route")
         self.assertTrue(reply.routes, "but the walk stays on the map")
+
+class ListFollowUpTests(unittest.TestCase):
+    """Choosing from the list we just showed, and ids that are ids."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.graph = CampusGraph.load(graph_path())
+        cls.places = PlaceIndex(cls.graph, OFFLINE)
+
+    def dialogue(self) -> Dialogue:
+        return Dialogue(self.graph, client=None, narrator=None, places=self.places)
+
+    def node(self, name: str) -> str:
+        for candidate in self.graph.nodes.values():
+            if candidate.name == name:
+                return candidate.id
+        raise AssertionError(name)
+
+    def listing(self, *names: str) -> FacilityResult:
+        rows = [{"node_id": self.node(name), "name": name, "metres": 120} for name in names]
+        return FacilityResult("list", "lunch", len(rows), "", rows=rows)
+
+    # The "pointing at the list" heuristic that used to live here was removed with the
+    # stateless parser: the model resolves "the nearest one" from the conversation now, and
+    # keeping a phrase list for it was one of the patches that made this layer grow.
+
+    def test_the_choice_re_ranks_from_where_the_user_says_they_are(self) -> None:
+        # "the nearest from here": the list was measured from Core P, which is not here.
+        talk = self.dialogue()
+        talk.state.last_facilities = self.listing("U Green (Staff Club)", "LibCafé")
+        slots = Slots(intent="route", facility_choice=0,
+                      origin_text="Block L (Pao Yue-Kong Library)")
+        reply = talk._facility_choice(slots)
+        self.assertIsNotNone(reply.route)
+        self.assertEqual(self.graph.node(reply.route.path[-1]).name, "LibCafé")
+        self.assertEqual(reply.route.path[0], self.node("Block L (Pao Yue-Kong Library)"))
+
+    def test_a_node_id_is_never_resolved_as_if_it_were_a_name(self) -> None:
+        # The id went through the embeddings and came back as Core B: an id is not a name.
+        talk = self.dialogue()
+        cafe = self.node("LibCafé")
+        talk._absorb_places(Slots(intent="route", destination_text=cafe))
+        self.assertEqual(talk.state.destination, cafe)
+
+    def test_a_place_you_are_standing_in_is_already_there(self) -> None:
+        # A facility published at the same coordinate as the place you named: a zero-metre
+        # "route" is not an answer. (LibCafé, by contrast, is a real 35 m walk from the
+        # library door and keeps its route -- see the test above.)
+        talk = self.dialogue()
+        talk.state.last_facilities = self.listing("Toilet (Core P)")
+        talk.state.origin = self.node("Core P")
+        reply = talk._facility_choice(Slots(intent="route", facility_choice=0))
+        self.assertIsNone(reply.route)
+        self.assertIn("already", reply.text)
 
 if __name__ == "__main__":
     unittest.main()

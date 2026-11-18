@@ -195,6 +195,25 @@ class GrammarPropertyTests(unittest.TestCase):
         self.assertEqual(slots.intent, "route")
         self.assertEqual(slots.destination_text, "library")
 
+    def test_a_need_only_the_engine_vocabulary_knows_is_understood(self) -> None:
+        # The grammar's own word list is short. These are needs that only places.
+        # FACILITY_WORDS knows, and they used to fall through to "I can find walking
+        # routes, point you to facilities..." -- or worse, route to a department called
+        # "Food Science and Nutrition" because the sentence mentioned food.
+        for text in ("i want to grab lunch, where can i head to?",
+                     "where can I get food",
+                     "I feel sick",
+                     "where can I get cash",
+                     "I need to print something",
+                     "is there a doctor on campus"):
+            self.assertEqual(self.slots(text).intent, "facility_query", text)
+
+    def test_the_engine_vocabulary_does_not_outrank_a_route_or_a_closure(self) -> None:
+        # "lunch" must not turn a route into a facility list, or a closure into a search.
+        self.assertEqual(self.slots("how do I get to the canteen?").intent, "route")
+        self.assertEqual(self.slots("the canteen is closed").intent, "close")
+        self.assertEqual(self.slots("is the canteen open?").intent, "hours_query")
+
     def test_an_overview_question_is_not_a_route(self) -> None:
         # "what facilities are there" mentions a place called "UMF - Cleanroom Facility";
         # a request for the list of amenities is not a journey to a cleanroom.

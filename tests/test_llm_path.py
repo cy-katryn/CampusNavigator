@@ -170,12 +170,76 @@ class LlmPathTests(unittest.TestCase):
         self.assertEqual(slots.intent, "close")
         self.assertIn("canteen", slots.closed_text)
 
+    def test_the_fallback_says_why_the_model_was_not_the_one_answering(self) -> None:
+        # "understood by grammar" alone cannot be diagnosed: no key, a dead API, the model
+        # declining and the model being wrong all look identical in the transcript.
+        abstained = parse("hi there", self.graph,
+                          StubClient({"intent": "out_of_scope"}), self.places)
+        self.assertEqual(abstained.source, "grammar")
+        self.assertEqual(abstained.parse_note, "model abstained")
+
+        invented = parse("where is the library?", self.graph,
+                         StubClient({"intent": "route", "destination": "qqqq"}),
+                         self.places)
+        self.assertEqual(invented.parse_note, "model slots rejected")
+
+        from campus_nav.nlu import parse as parse_without_model
+        offline = parse_without_model("where is the library?", self.graph, None, self.places)
+        self.assertEqual(offline.parse_note, "no model configured")
+        self.assertEqual(offline.source, "grammar")
+
     def test_junk_json_falls_back_to_the_grammar(self) -> None:
         client = StubClient({})
         slots = parse("how do I get from Block V to the library?", self.graph, client,
                       self.places)
         self.assertEqual(slots.source, "grammar")
 
+
+class ConversationContextTests(unittest.TestCase):
+    """The parser sees the last turns; the guard decides what it may do with them."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.graph = CampusGraph.load(graph_path())
+        cls.places = PlaceIndex(cls.graph, OFFLINE)
+
+    def node(self, name: str) -> str:
+        for candidate in self.graph.nodes.values():
+            if candidate.name == name:
+                return candidate.id
+        raise AssertionError(name)
+
+    def test_the_parser_is_given_the_previous_turns(self) -> None:
+        # A stateless parser cannot read "the nearest one": it has nothing to point at.
+        client = StubClient({"intent": "route", "origin": "library", "destination": "LibCafé"})
+        history = [{"role": "user", "content": "I want to grab lunch, where can I go?"},
+                   {"role": "assistant", "content": "The nearest lunch spot is LibCafé."}]
+        parse("the nearest one", self.graph, client, self.places, history)
+        sent = client.seen[0]
+        self.assertEqual(len(sent), 1 + len(history) + 1)
+        self.assertIn("LibCafé", sent[-2]["content"])
+
+    def test_a_reference_may_take_its_place_from_the_conversation(self) -> None:
+        # "just show me the path to the nearsest from here": the place comes from the
+        # previous answer, so evidence has to be allowed to come from the conversation.
+        client = StubClient({"intent": "route", "origin": "library", "destination": "LibCafé"})
+        history = [{"role": "user", "content": "I want to grab lunch, where can I go?"},
+                   {"role": "assistant", "content": "The nearest lunch spot is LibCafé."},
+                   {"role": "user", "content": "I am at library"}]
+        slots = parse("just show me the path to the nearsest from here", self.graph, client,
+                      self.places, history)
+        self.assertEqual(slots.source, "llm")
+        self.assertEqual(slots.destination_text, "LibCafé")
+        self.assertEqual(slots.origin_text, "library")
+
+    def test_a_message_with_no_reference_may_not_inherit_an_old_endpoint(self) -> None:
+        # The failure this guard exists for: "where is the library?" answered as a route
+        # from Block V because an earlier turn mentioned it. History must not revive it.
+        client = StubClient({"intent": "route", "origin": "Block V",
+                             "destination": "the library"})
+        history = [{"role": "assistant", "content": "You can walk from Block V to Core A."}]
+        slots = parse("where is the library?", self.graph, client, self.places, history)
+        self.assertEqual(slots.origin_text, "")
 
 class GroundedNumberTests(unittest.TestCase):
     def facts(self) -> Facts:

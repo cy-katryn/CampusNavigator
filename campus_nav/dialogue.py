@@ -26,7 +26,7 @@ from .llm import DeepSeekClient
 from .narrate import Facts, Narration, Narrator
 from .nlu import (REOPEN, Slots, asks_for_everything, facility_words, names_destination,
                   parse, parse_with_grammar, refers_to_last_distance, stair_request)
-from .place_index import PlaceIndex
+from .place_index import PlaceIndex, shares_a_name_word
 from .places import (
     CAPABILITY_LABELS,
     SERVICE_WORDS,
@@ -123,6 +123,11 @@ def place_legs(graph: CampusGraph, route: RouteResult) -> list[tuple[str, str, f
 
 # A comfortable campus walking pace: 4.5 km/h. Used only to turn the measured metres into
 # "about N minutes", which is the number a person actually plans with.
+# How many messages of history the parser sees: two exchanges is enough to resolve "the
+# nearest one" or "make it go via X", and short enough that an old turn cannot be mistaken
+# for the current question.
+HISTORY_TURNS = 6
+
 WALK_MPS = 1.25
 
 
@@ -185,24 +190,11 @@ _GREETING = re.compile(
     r"[s!,.?。，！？~]*$",
     re.I,
 )
-# "no stops", "the direct route": the walk without the places added along the way.
-_NO_STOPS = re.compile(
-    r"\b(?:no|without|drop|remove|forget|clear|skip)\b[^.!?]{0,24}\bstops?\b|"
-    r"\b(?:the\s+)?direct\s+(?:route|way)\b|\bgo\s+direct(?:ly)?\b|"
-    r"\bno\s+(?:more\s+)?(?:detours?|stops?)\b|"
-    r"唔使(?:再)?(?:經|经)|(?:不|唔)(?:再)?(?:經過|经过|经)|直接去",
-    re.I,
-)
-
-# A stop described by what it is for, rather than named: "get a quick breakfast along the
-# way". The discourse marker is what makes it a request about the *current* walk; without it
-# "where is the nearest canteen" is a question, not an instruction.
-_ALONG_THE_WAY = re.compile(
-    r"\b(?:along|on)\s+(?:the|my)\s+way\b|\ben\s+route\b|\bon\s+my\s+route\b|"
-    r"\bwhile\s+(?:i\s+)?(?:walk|walking|passing)\b|"
-    r"途中|沿途|順路|顺路|路上",
-    re.I,
-)
+# Phrase matching lives in nlu.py, not here: the model reads the words, the grammar reads
+# them offline, and this layer reads the resulting slots. What is left in this file that looks
+# like language -- the greeting, the thanks, "along the way" -- are *decisions about the
+# conversation* (a greeting is not a place question; a wish attached to the walk in progress
+# is a stop rather than a new journey), and they are documented where they sit.
 
 # How much walking a stop found by description may add before it is offered instead of
 # inserted. Four hundred metres is about five minutes: past that, the user is choosing a
@@ -226,6 +218,8 @@ class Dialogue:
         self.narrator = narrator
         self.state = SessionState()
         self._places = places
+        # Recent exchanges, for the parser only: the engine reads its own state, not this.
+        self.history: list[dict] = []
         # Built lazily: 876 documents cost about a tenth of a second, which is too
         # much to spend on a /help or /quit, and nothing for a real question.
         self._knowledge = knowledge
@@ -300,6 +294,57 @@ class Dialogue:
         return endpoints
 
     def handle(self, text: str, *, endpoints: dict | None = None) -> Reply:
+        """Answer one message, and remember the exchange for the next one.
+
+        The parser is given the last few turns (see nlu.parse), because referring
+        expressions -- "the nearest one", "make it go via Core P", "and the toilet?" -- are
+        only meaningful in context. The engine's state stays the authority for facts; the
+        conversation is only what the *language* layer reads.
+        """
+        reply = self._handle(text, endpoints=endpoints)
+        self._remember(text, reply)
+        return reply
+
+    def reset(self) -> None:
+        """Forget the conversation: the engine's state and the parser's history both.
+
+        The history existed as a second kind of memory, and resetting only the first one
+        left the parser able to read a conversation the user had just cleared.
+        """
+        self.state = SessionState()
+        self.history.clear()
+
+    def _context_digest(self) -> dict | None:
+        """The journey in one line, from the engine's state rather than from the prose.
+
+        Six messages of history resolve "the nearest one"; they cannot carry a journey
+        through a long aside. The state can, and it is a fact rather than a transcript, so it
+        is handed over as a separate system message: the model may repeat these endpoints,
+        and it may never invent one.
+        """
+        state = self.state
+        if not (state.origin or state.destination or state.stops):
+            return None
+        def label(node_id: str | None) -> str:
+            return self.graph.node(node_id).name if node_id in self.graph.nodes else "?"
+        parts = [f"origin: {label(state.origin)}" if state.origin else "origin: not known"]
+        parts.append(f"destination: {label(state.destination)}" if state.destination
+                     else "destination: not known")
+        if state.stops:
+            parts.append("stops in order: " + ", ".join(label(stop) for stop in state.stops))
+        if state.avoid_stairs:
+            parts.append("stairs avoided")
+        return {"role": "system",
+                "content": "CURRENT JOURNEY, from the app's own state (not the user's words "
+                           "above): " + "; ".join(parts) + "."}
+
+    def _remember(self, text: str, reply: "Reply") -> None:
+        said = (reply.spoken or reply.text or "").strip().replace("\n", " ")
+        self.history.append({"role": "user", "content": text.strip()[:400]})
+        self.history.append({"role": "assistant", "content": said[:400]})
+        del self.history[:-HISTORY_TURNS]
+
+    def _handle(self, text: str, *, endpoints: dict | None = None) -> Reply:
         if endpoints is None and _GREETING.match(text.strip()):
             warm = ", ".join(self._warm_examples())
             return Reply(
@@ -310,7 +355,9 @@ class Dialogue:
         if endpoints is None and _THANKS.match(text.strip()):
             return Reply("Any time. Where next?", notes=["greeting"])
         if endpoints is None:
-            slots = parse(text, self.graph, self.client, self.places)
+            digest = self._context_digest()
+            context = ([digest] if digest else []) + self.history
+            slots = parse(text, self.graph, self.client, self.places, context)
             self._interpret_pending_place(stair_request(text)[0], slots)
         else:
             # The selections replace only the place slots. Keep the original
@@ -325,19 +372,19 @@ class Dialogue:
                 if role not in ("origin", "destination") or not node or node.kind == "waypoint":
                     raise ValueError("Choose a named place on the campus map.")
                 setattr(slots, role + "_text", node_id)
-        if endpoints is None and _NO_STOPS.search(text):
+        if endpoints is None and slots.clear_stops:
             # "no stops", "just the direct route": drop the places added along the way and
-            # plan the walk again without them.
+            # plan the walk again without them. The parser read the words; the state change
+            # is the dialogue's.
             self.state.stops = []
             if slots.intent == "out_of_scope":
                 slots.intent = "route"
-            slots.clear_stops = True
         intent = slots.intent
 
         if intent == "help":
             return self._help()
         if intent == "reset":
-            self.state = SessionState()
+            self.reset()
             return Reply("Cleared. Where would you like to go?")
 
         if slots.facility_choice is not None:
@@ -349,7 +396,7 @@ class Dialogue:
             # the words and this line decides, from the map's own vocabulary.
             if not slots.item:
                 slots.item = amenity_in_text(slots.need or slots.subject)
-            if intent == "facility_query" and _ALONG_THE_WAY.search(text):
+            if intent == "facility_query" and slots.along_the_way:
                 # "I also want a quick breakfast along the way" is not a question about where
                 # catering is; it is an instruction about the walk in progress.
                 inserted = self._stop_for_need(slots)
@@ -531,6 +578,13 @@ class Dialogue:
         unresolved = []
         for role, text in (("origin", slots.origin_text), ("destination", slots.destination_text)):
             if not text:
+                continue
+            if text in self.graph.nodes and self.graph.node(text).kind != "waypoint":
+                # Already an id: a list choice or a confirmed endpoint names a node, not a
+                # phrase. Embedding an id string returns unrelated neighbours -- "the nearest"
+                # chosen from a canteen list arrived as Core B, because the id went through
+                # the resolver as if it were a name.
+                setattr(self.state, role, text)
                 continue
             matches = self._preferred_matches(text)
             if len(matches) == 1:
@@ -1260,6 +1314,9 @@ class Dialogue:
             reply.facility_result = FacilityResult("no_match", raw)
             return reply
 
+        # Nobody has said where they are: distances come from the map reference, and the
+        # reply says so rather than letting "from Core P" imply the user is at Core P.
+        slots.unknown_origin = not self.state.origin and self.state.last_route is None
         reference = self._distance_reference
         if slots.facility_origin:
             origins = self._preferred_matches(slots.facility_origin)
@@ -1307,9 +1364,48 @@ class Dialogue:
         spoken += "."
         if len(matching) > 1:
             spoken += f" There are {len(matching)} on the map; the others are on screen."
+        if slots.unknown_origin:
+            # The distances are measured from a map reference because nobody said where the
+            # user is. Say that instead of quietly implying they are standing at Core P.
+            spoken += (" I do not know where you are starting from -- tell me and I will "
+                       "re-rank these from there.")
         info = FacilityResult("list", raw, len(matching), reference or "", rows=cards,
                               route_origin=reference if slots.facility_origin else "")
-        return Reply("\n".join(lines), slots=slots, facilities=cards, spoken=spoken, facility_result=info)
+        reply = Reply("\n".join(lines), slots=slots, facilities=cards, spoken=spoken,
+                      facility_result=info)
+        # The model phrases the answer, the engine supplies the facts -- the same division as
+        # for routes. Facility replies used to be the only answers spoken by a template, which
+        # is why they read like a database dump next to the narrated routes.
+        narration = self._narrate(Facts(
+            kind="places",
+            origin="",
+            destination="",
+            reachable=True,
+            need=raw or slots.subject or "",
+            match_count=len(matching),
+            reference=self.graph.node(reference).name if reference else "",
+            best={
+                "name": best["name"],
+                "building": best["building"],
+                "floor": best["floor"],
+                "metres": best["metres"],
+                "hours_today": best["hours_today"],
+                "open_now": best["open_now"],
+            },
+        ))
+        self._attach_narration(reply, narration)
+        if narration.ok:
+            reply.spoken = narration.text
+        if slots.unknown_origin and reference:
+            # Not in the model's facts on purpose: this is an instruction about the
+            # conversation, so it is appended rather than left to the prose. Worded as a
+            # statement about the *measurement*, not about the user's location -- the model
+            # reading "mapped at the same location as Core P" as "right where you are" made
+            # the two halves contradict each other.
+            reply.spoken = (reply.spoken + f" Distances are measured from "
+                            f"{self.graph.node(reference).name} -- tell me where you are and "
+                            "I will re-rank them.").strip()
+        return reply
 
     def _facility_choice(self, slots):
         last = self.state.last_facilities
@@ -1318,12 +1414,49 @@ class Dialogue:
             kind = "ask_category" if (index == 0 and "最近" in slots.subject and not (last and last.rows)) else "choice_missing"
             return Reply("Which facility do you mean?", slots=slots,
                          facility_result=FacilityResult(kind))
-        card = last.rows[index]
+        # "the nearest from here": where the user now says they are re-ranks the list. The
+        # distances were measured from the map reference (Core P) or from where the previous
+        # walk started, and neither is where they are standing now.
+        reference = self.state.origin or last.route_origin
+        here = self._preferred_matches(slots.origin_text) if slots.origin_text else []
+        if len(here) == 1:
+            reference = here[0].id
+            self.state.origin = reference
+            if index == 0:
+                def distance(row: dict) -> float:
+                    node = self.graph.nodes.get(row.get("node_id") or "")
+                    return self.graph.node(reference).distance_to(node) if node else float("inf")
+
+                last.rows.sort(key=distance)
+                for row in last.rows:
+                    node = self.graph.nodes.get(row.get("node_id") or "")
+                    metres = self._distance_from(node, reference) if node else None
+                    if metres is not None:
+                        row["metres"] = round(metres)
+        card = last.rows[index] if index < len(last.rows) else last.rows[0]
         node_id = card.get("node_id")
+        same_place = (
+            bool(node_id) and bool(reference)
+            and node_id in self.graph.nodes and reference in self.graph.nodes
+            and (node_id == reference
+                 or self.graph.node(reference).distance_to(self.graph.node(node_id)) < 5.0)
+        )
+        if slots.intent == "route" and same_place:
+            # "the nearest from here" when the nearest IS here: a zero-metre route is not an
+            # answer, and "you are already there" is.
+            where = ", ".join(p for p in (card.get("building"), card.get("floor")) if p)
+            return Reply(
+                f'{card["name"]} is in this building -- you are already there'
+                + (f" ({where})." if where else "."),
+                slots=slots, facilities=[card],
+                facility_result=FacilityResult("selected", last.subject, rows=[card]),
+            )
         if slots.intent == "route" and node_id in self.graph.nodes:
             self.state.last_facilities = None
-            slots.origin_text = last.route_origin
+            slots.origin_text = ""
             slots.destination_text = node_id
+            if reference:
+                self.state.origin = reference
             if slots.avoid_stairs is not None:
                 self.state.avoid_stairs = slots.avoid_stairs
             return self._route_reply(slots)
