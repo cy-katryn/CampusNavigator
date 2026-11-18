@@ -83,27 +83,6 @@ class TableAgreementTests(unittest.TestCase):
                                 f"{capability!r} has no Chinese label")
 
 
-class PayloadGuardTests(unittest.TestCase):
-    """The narration guard reads the payload, so a new field cannot outgrow it."""
-
-    def test_every_number_in_the_payload_is_allowed(self) -> None:
-        from campus_nav.narrate import NUMBER, Facts
-        facts = Facts(kind="places", origin="", destination="", reachable=True,
-                      need="canteen", match_count=24, reference="Core P",
-                      best={"name": "Communal Student Canteen", "floor": "3/F",
-                            "metres": 123, "hours_today": "07:30 - 20:30"},
-                      language="zh-HK")
-        allowed = facts.grounded_numbers()
-        for token in NUMBER.findall(str(facts.as_prompt_json())):
-            self.assertIn(float(token), allowed, f"{token} is in the payload but not allowed")
-
-    def test_a_number_outside_the_payload_is_still_refused(self) -> None:
-        from campus_nav.narrate import Facts, grounded_numbers
-        facts = Facts(kind="places", origin="", destination="", reachable=True,
-                      need="canteen", match_count=24, best={"metres": 123})
-        self.assertEqual(grounded_numbers("大概 400 米。", facts.grounded_numbers()), ["400"])
-
-
 if __name__ == "__main__":
     unittest.main()
 

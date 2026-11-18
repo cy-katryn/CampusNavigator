@@ -14,7 +14,7 @@ The pipeline, in order (this is the "RAG" part, and it is worth drawing on a sli
       -> campus_nav/nlu.py      which places and which intent does this sentence have?
       -> campus_nav/kb.py       retrieve the documents that mention those places
       -> campus_nav/graph.py    if a route is wanted, plan it over real coordinates
-      -> campus_nav/narrate.py  phrase the answer, refusing numbers nobody computed
+      -> campus_nav/agent.py    the model writes the sentence; narrate.py checks it
 
 Three rules this module enforces, because they are the difference between a useful
 domain bot and a confident liar:

@@ -63,7 +63,6 @@ from .kb import KnowledgeBase
 from .landmarks import landmarks_along
 from .llm import DeepSeekClient
 from .local_names import building_name, floor_name, localize_label, place_name
-from .narrate import Narrator
 from .pinecone import PineconeError
 from . import render
 from .place_index import PlaceIndex, PlaceIndexError
@@ -378,14 +377,12 @@ class App:
         self.knowledge = KnowledgeBase.from_raw(RAW_DIR)
         self.footprints = load_shapes(shapes_path())
         client = DeepSeekClient(self.settings) if self.settings.llm_available else None
-        narrator = Narrator(client) if self.settings.narration_available else None
         self.places = PlaceIndex(self.graph, self.settings)
         self.index_info = self.places.check()
         # The graph, the knowledge base and the place index are shared: read-only and
         # expensive. The *conversation* is not shared -- two browsers, or two tabs, must
         # not overwrite each other's origin, destination or closures.
         self.client = client
-        self.narrator = narrator
         self._dialogues: OrderedDict[str, Dialogue] = OrderedDict()
 
     MAX_SESSIONS = 32
@@ -396,7 +393,7 @@ class App:
         if found is not None:
             self._dialogues.move_to_end(session)
             return found
-        dialogue = Dialogue(self.graph, self.client, self.narrator,
+        dialogue = Dialogue(self.graph, self.client,
                             knowledge=self.knowledge, places=self.places)
         self._dialogues[session] = dialogue
         while len(self._dialogues) > self.MAX_SESSIONS:
@@ -430,11 +427,9 @@ class App:
         self.settings = replace(self.settings, **changes)
 
         client = DeepSeekClient(self.settings) if self.settings.llm_available else None
-        narrator = Narrator(client) if self.settings.narration_available else None
-        self.client, self.narrator = client, narrator
+        self.client = client
         for dialogue in self._dialogues.values():
             dialogue.client = client
-            dialogue.narrator = narrator
 
         # A new embeddings or vector-store key changes how place names are resolved, so
         # the index is re-probed now: the very next message uses the new path instead of

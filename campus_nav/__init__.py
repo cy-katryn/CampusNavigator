@@ -10,9 +10,9 @@ Package layout (deliberately flat so `python -m campus_nav.web` just works):
     search.py    A* and Uniform-Cost Search with comparable statistics
     places.py    the one vocabulary shared by the data pipeline and the dialogue
     kb.py        knowledge base: 561 facts, BM25 retrieval, opening-hours logic
-    nlu.py       turns free text into slots -- LLM first, grammar fallback
+    nlu.py       the shared vocabulary: Slots, has_cjk, asks_for_everything, REOPEN
     agent.py     the map assistant: search/ask/path/facilities/hours/close tools
-    narrate.py   Level B: the model phrases the reply, the numbers stay computed
+    narrate.py   the three checks a sentence must pass before it is spoken
     dialogue.py  multi-turn state: follow-ups, constraints, facilities, hours
     web.py       the web application (http.server + JSON API)
     static/      its HTML/CSS/JS: chat, SVG map, speech, avatar

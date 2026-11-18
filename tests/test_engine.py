@@ -29,7 +29,7 @@ class EngineCase(unittest.TestCase):
         cls.places = PlaceIndex(cls.graph, OFFLINE)
 
     def talk(self) -> Dialogue:
-        return Dialogue(self.graph, client=None, narrator=None, places=self.places)
+        return Dialogue(self.graph, client=None, places=self.places)
 
     def endpoint(self, phrase: str) -> str:
         matches = self.places.resolve(phrase)

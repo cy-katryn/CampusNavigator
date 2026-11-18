@@ -49,7 +49,7 @@ class RenderTests(unittest.TestCase):
 
     def route_reply(self, origin: str, destination: str, lang: str = "en-US"):
         """The engine's own reply, built the way the agent's path() tool builds it."""
-        talk = Dialogue(self.graph, client=None, narrator=None, places=self.places)
+        talk = Dialogue(self.graph, client=None, places=self.places)
         talk.display_language = lang
         ids = {}
         for role, phrase in (("origin", origin), ("destination", destination)):

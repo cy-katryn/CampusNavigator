@@ -98,7 +98,6 @@ class Settings:
     model: str
     llm_enabled: bool
     timeout_s: int
-    narrate: bool = True
     base_url: str = "https://api.deepseek.com/v1"
     # -- place-name retrieval (embeddings + Pinecone), not the fact knowledge base
     embeddings_api_key: str = ""
@@ -128,16 +127,9 @@ class Settings:
         return bool(self.embeddings_api_key and self.pinecone_api_key)
 
     @property
-    def narration_available(self) -> bool:
-        """True when the model is allowed to write the reply (Level B)."""
-        return self.llm_available and self.narrate
-
-    @property
     def mode_label(self) -> str:
-        if self.llm_available and self.narrate:
-            return "LLM understands and narrates (Level B), grammar fallback"
         if self.llm_available:
-            return "LLM understands and narrates (Level A: no narration)"
+            return "model configured: it reads the question, chooses tools, writes the sentence"
         return "no model configured -- the assistant cannot read questions"
 
 
@@ -155,7 +147,6 @@ def get_settings() -> Settings:
                   or "https://api.deepseek.com/v1"),
         llm_enabled=_flag("LLM_ENABLED", True),
         timeout_s=_int("LLM_TIMEOUT", 20),
-        narrate=_flag("LLM_NARRATE", True),
         embeddings_api_key=os.environ.get("EMBEDDINGS_API_KEY", "").strip(),
         embeddings_model=(
             os.environ.get("EMBEDDINGS_MODEL", DEFAULT_EMBEDDINGS_MODEL).strip()

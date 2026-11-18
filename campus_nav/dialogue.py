@@ -25,7 +25,6 @@ from .kb import KnowledgeBase, hours_summary, open_state, today_hours
 from . import hours
 from .landmarks import landmarks_along
 from .llm import DeepSeekClient
-from .narrate import Facts, Narration, Narrator
 from .nlu import REOPEN, Slots, asks_for_everything, has_cjk
 from .place_index import PlaceIndex
 from .places import (
@@ -62,10 +61,9 @@ def place_legs(graph: CampusGraph, route: RouteResult) -> list[tuple[str, str, f
     nothing, so they are folded into the leg that leads to the next real place.
 
     Exactly one function decides what a "leg" is, because two places ask the same
-    question: the printed route, and the facts handed to the narrator. When they
-    computed it separately the narrator was told " to : 16 m" once per graph edge
-    while the reader was told "1 leg", so the model wrote prose about a walk made
-    of twenty-nine unnamed hops.
+    question: the printed route, and the landmarks drawn along it. When they computed
+    it separately one said " to : 16 m" once per graph edge while the reader was told
+    "1 leg", so the answer described a walk made of twenty-nine unnamed hops.
 
     Returns (from label, to label, metres, uses stairs). The metres of the legs add
     up to route.total_metres: folding groups the segments, it never drops one.
@@ -166,22 +164,17 @@ _THANKS = re.compile(
 
 class Dialogue:
     def __init__(self, graph: CampusGraph, client: DeepSeekClient | None = None,
-                 narrator: Narrator | None = None,
                  knowledge: KnowledgeBase | None = None,
                  places: PlaceIndex | None = None) -> None:
         self.graph = graph
         self.client = client
-        self.narrator = narrator
         self.state = SessionState()
         self._places = places
         # The model-first path (agent.py). Built lazily, because the client may be replaced
         # when a key is entered in the settings dialog.
         self._agent = None
-        # Whether this turn may use the model at all. The agent turns it off when the model
-        # is unreachable, so the fallback does not then ask the same dead endpoint to narrate.
+        # Whether this turn may use the model at all.
         self._llm_ok_for_turn = True
-        # The agent writes the prose itself; narration would ask the model again.
-        self.narrate = True
         # The whole conversation, for the parser only: the engine reads its own state, not
         # this.
         self.history: list[dict] = []
@@ -867,19 +860,12 @@ class Dialogue:
             body += [f"  - {s}" for s in suggestions]
             body.append("Which would you like?")
             template = "\n".join(body)
-            facts = self._facts_from_route(route, origin, destination, constraints, previous_total)
-            narration = self._narrate(facts)
-            reply = Reply(
+            # The receipt stays behind the details toggle; the model's sentence is spoken.
+            return Reply(
                 (prefix + "\n" if prefix else "") + template,
                 route=route, slots=slots, notes=notes, routes=routes,
-                # The model's sentence is what gets spoken and what the bubble leads with;
-                # the template stays behind the details toggle. Prepending it to the text
-                # showed the same answer twice in two wordings.
-                spoken=narration.text if narration.ok else "",
                 lead_prefix=prefix,
             )
-            self._attach_narration(reply, narration)
-            return reply
 
         text = fmt_route(self.graph, route)
         if len(routes) > 1:
@@ -918,70 +904,13 @@ class Dialogue:
                 f"{comparison['ucs']['expanded']} for the same {comparison['astar']['metres']:.0f} m route."
             )
 
-        # Level B: the model phrases the answer, the calculation supplies the facts.
-        facts = self._facts_from_route(route, origin, destination, constraints, previous_total)
-        narration = self._narrate(facts)
-        reply = Reply(
+        return Reply(
             (prefix + "\n" if prefix else "") + text,
             route=route, slots=slots, notes=notes, routes=routes,
-            spoken=narration.text if narration.ok else "",
             lead_prefix=prefix,
         )
-        self._attach_narration(reply, narration)
-        return reply
-
-    # -- narration helpers -------------------------------------------------
-    def _facts_from_route(self, route, origin: str, destination: str,
-                          constraints: list[str], previous_total: float | None) -> Facts:
-        """Collect exactly what the model may talk about.
-
-        The legs come from place_legs(), the same function that prints the route:
-        a graph edge between two unnamed junctions is not a leg, and describing one
-        as "to : 16 m" gives the model nothing to write a sentence about.
-        """
-        legs = place_legs(self.graph, route)
-        segments = [
-            f"{start} to {end}: {metres:.0f} m{' (steps)' if stairs else ''}"
-            for start, end, metres, stairs in legs
-        ]
-        options, option_metres = [], []
-        if not route.reachable:
-            for suggestion in self._suggestions(origin, destination):
-                options.append(suggestion)
-                match = re.search(r"\((\d+)\s*m\)", suggestion)
-                if match:
-                    option_metres.append(float(match.group(1)))
-        return Facts(
-            kind="route" if route.reachable else "no_route",
-            origin=self.graph.node(origin).name,
-            destination=self.graph.node(destination).name,
-            reachable=route.reachable,
-            total_metres=route.total_metres if route.reachable else None,
-            walk_minutes=walk_minutes(route.total_metres) if route.reachable else None,
-            segment_lines=segments,
-            segment_metres=[metres for _, _, metres, _ in legs],
-            constraints=constraints,
-            previous_metres=previous_total,
-            blocking=[self._describe_blocking()] if not route.reachable else [],
-            options=options,
-            option_metres=option_metres,
-            language=self.display_language,
-        )
-
-    def _narrate(self, facts: Facts) -> Narration:
-        if self.narrator is None or not self.narrate or not self._llm_ok_for_turn:
-            return Narration(False, reason="no narrator configured")
-        return self.narrator.narrate(facts)
 
     @staticmethod
-    def _attach_narration(reply: "Reply", narration: Narration) -> None:
-        reply.narrated = narration.ok
-        if narration.ok:
-            reply.notes.append(f"Narrated by the model ({narration.reason})")
-        elif narration.reason not in {"no LLM configured", "no narrator configured"}:
-            # a configured model that failed is worth reporting; an absent one is not
-            reply.notes.append(f"Template reply used ({narration.reason})")
-
     def _describe_blocking(self) -> str:
         parts = []
         if self.state.avoid_stairs:
@@ -1220,33 +1149,8 @@ class Dialogue:
                               route_origin=reference if slots.facility_origin else "")
         reply = Reply("\n".join(lines), slots=slots, facilities=cards, spoken=spoken,
                       facility_result=info)
-        # The model phrases the answer, the engine supplies the facts -- the same division as
-        # for routes. Facility replies used to be the only answers spoken by a template, which
-        # is why they read like a database dump next to the narrated routes.
-        narration = self._narrate(Facts(
-            kind="places",
-            origin="",
-            destination="",
-            reachable=True,
-            need=raw or slots.subject or "",
-            match_count=len(matching),
-            user_location_known=not slots.unknown_origin,
-            reference=self.graph.node(reference).name if reference else "",
-            best={
-                "name": best["name"],
-                "building": best["building"],
-                "floor": best["floor"],
-                "metres": best["metres"],
-                "hours_today": best["hours_today"],
-                "open_now": best["open_now"],
-            },
-            language=self.display_language,
-        ))
-        self._attach_narration(reply, narration)
-        if narration.ok:
-            reply.spoken = narration.text
         # The engine's guarantee that the measurement is stated: always for the catalogue's
-        # own sentence, and for a narrated one only when the model did not mention the
+        # own sentence, and for the model's sentence only when it did not mention the
         # reference place itself (then repeating it would say the same thing twice).
         narrated = bool(getattr(reply, "narrated", False))
         needs_note = (not narrated) or (

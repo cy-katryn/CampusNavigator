@@ -29,7 +29,7 @@ from __future__ import annotations
 import json
 import re
 
-from . import lexical
+from . import lexical, narrate
 from .embeddings import EmbeddingError
 from .format import walk_minutes
 from .nlu import Slots
@@ -170,6 +170,7 @@ class MapAgent:
         self._reply: Reply | None = None
         self._question = ""
         self._intent = "out_of_scope"
+        self._payloads: list = []      # every tool result, for the sentence checks
 
     # -- public ------------------------------------------------------------
     def handle(self, text: str, language: str | None = None) -> Reply | None:
@@ -193,38 +194,35 @@ class MapAgent:
         messages.extend(dialogue.history)
         messages.append({"role": "user", "content": text})
 
-        # The tool replies are the facts; the model's last sentence is the prose. Narration
-        # inside the tools would ask the same model a second question about its own answer.
-        narrate = dialogue.narrate
-        dialogue.narrate = False
+        # The tool replies are the facts; the model's last sentence is the prose. Every
+        # payload is kept so the sentence can be checked against it before it is spoken.
         final = ""
-        try:
-            for _step in range(MAX_STEPS):
-                result = client.chat(messages, tools=TOOLS, max_tokens=700, retries=2)
-                if not getattr(result, "ok", False):
-                    return None          # let the grammar answer this turn
-                calls = list(getattr(result, "tool_calls", None) or [])
-                if not calls:
-                    final = (result.text or "").strip()
-                    break
+        self._payloads = []
+        for _step in range(MAX_STEPS):
+            result = client.chat(messages, tools=TOOLS, max_tokens=700, retries=2)
+            if not getattr(result, "ok", False):
+                return None          # the caller answers that the model is unreachable
+            calls = list(getattr(result, "tool_calls", None) or [])
+            if not calls:
+                final = (result.text or "").strip()
+                break
+            messages.append({
+                "role": "assistant",
+                "content": result.text or "",
+                "tool_calls": calls,
+            })
+            for call in calls:
+                payload = self._invoke(call)
+                self._payloads.append(payload)
                 messages.append({
-                    "role": "assistant",
-                    "content": result.text or "",
-                    "tool_calls": calls,
+                    "role": "tool",
+                    "tool_call_id": str(call.get("id") or ""),
+                    "content": json.dumps(payload, ensure_ascii=False),
                 })
-                for call in calls:
-                    payload = self._invoke(call)
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": str(call.get("id") or ""),
-                        "content": json.dumps(payload, ensure_ascii=False),
-                    })
-                    if self._question:
-                        break
                 if self._question:
                     break
-        finally:
-            dialogue.narrate = narrate
+            if self._question:
+                break
 
         return self._finish(final)
 
@@ -234,27 +232,50 @@ class MapAgent:
         if self._question:
             return Reply(self._question, slots=slots, spoken=self._question)
         base = self._reply
+        spoken, refused = self._checked(final, base)
         if base is None:
-            if not final:
+            if not spoken:
                 return None
-            reply = Reply(final, slots=slots, spoken=final)
-            reply.narrated = True
+            reply = Reply(spoken, slots=slots, spoken=spoken,
+                          narrated=True, notes=list(refused))
             return reply
         reply = Reply(
             base.text,
             route=base.route,
             slots=slots,
-            notes=list(base.notes),
-            narrated=bool(final),
+            notes=list(base.notes) + list(refused),
+            narrated=bool(spoken),
             facilities=list(base.facilities),
             routes=list(base.routes),
-            spoken=final,
+            spoken=spoken,
             lead_prefix=base.lead_prefix,
             facility_result=base.facility_result,
         )
-        if final:
+        if spoken:
             reply.notes.append("the model chose the steps; the engine supplied every number")
         return reply
+
+    def _checked(self, final: str, base: Reply | None) -> tuple[str, list[str]]:
+        """The sentence to speak, and any note about why it is not the model's own.
+
+        Three checks, on the sentence itself: the language asked for, numbers that came out
+        of a tool result, and no claim about where the user is. A sentence that fails them is
+        replaced by the engine's own rendering -- the same server-side text the map and the
+        details panel use -- so a refusal costs the phrasing, never the answer.
+        """
+        if not final:
+            return "", []
+        reasons = narrate.problems(
+            final,
+            self._payloads,
+            self.dialogue.display_language,
+            location_known=bool(self.dialogue.state.origin),
+        )
+        if not reasons:
+            return final, []
+        fallback = (base.spoken if base is not None else "") or (
+            base.text.split("\n")[0] if base is not None else "")
+        return fallback.strip(), [f"sentence refused ({'; '.join(reasons)})"]
 
     def _slots(self) -> Slots:
         return Slots(intent=self._intent, source="agent")

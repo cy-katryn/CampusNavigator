@@ -40,7 +40,6 @@ if "--live" not in sys.argv:
 from campus_nav.config import Settings, get_settings, graph_path   # noqa: E402
 from campus_nav.dialogue import Dialogue                          # noqa: E402
 from campus_nav.graph import CampusGraph                          # noqa: E402
-from campus_nav.narrate import Narrator                           # noqa: E402
 from campus_nav.llm import DeepSeekClient                         # noqa: E402
 from campus_nav.place_index import PlaceIndex                     # noqa: E402
 
@@ -101,10 +100,9 @@ def build(live: bool) -> tuple[CampusGraph, PlaceIndex, DeepSeekClient | None]:
 
 def record(graph: CampusGraph, index: PlaceIndex, client: DeepSeekClient | None,
            live: bool) -> dict:
-    narrator = Narrator(client) if client is not None else None
     out: dict = {}
     for case in CASES:
-        talk = Dialogue(graph, client=client, narrator=narrator, places=index)
+        talk = Dialogue(graph, client=client, places=index)
         turns = []
         for message in case["turns"]:
             # The request's language, exactly as the browser sends it. Without it the engine
