@@ -2,7 +2,7 @@ import { Mic, RotateCcw, Volume2, VolumeX } from 'lucide-react';
 
 export type AvatarState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'error';
 
-export const AVATAR_LABELS: Record<AvatarState, string> = {
+const AVATAR_LABELS: Record<AvatarState, string> = {
   idle: 'idle',
   listening: 'listening…',
   thinking: 'thinking…',

@@ -108,6 +108,7 @@ class Slots:
     language: str = "en"
     source: str = "grammar"
     avoid_stairs: bool | None = None  # None keeps the current route preference
+    clear_stops: bool = False         # "no stops" / "the direct route"
     facility_origin: str = ""
     facility_target: str = ""
     facility_choice: int | None = None  # zero-based position in the last displayed list

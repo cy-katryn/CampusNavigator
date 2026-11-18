@@ -171,7 +171,11 @@ one (a swim became the nearest water fountain); instead the places themselves ar
 meaning, and only matches close to the best one are offered. When there is more than one way there, the
 reply lists them — pick one and the map draws it. Stops work the same way: *"from Block Y to
 Core A, through Core P and the library"* is planned leg by leg (four searches, three legs) and
-still offered as up to three choices, made by swapping **one** leg for its next-best route
+Remembered across turns, too: "along the way, pass through Block X" extends the walk in
+progress, "I also want a quick breakfast on the way" asks the engine to find the nearest
+catering outlet with the smallest detour and says what that cost — and "no stops" puts the
+direct route back. Each is offered as up to three choices, made by swapping **one** leg for
+its next-best route
 rather than by taking the cross product of every leg. The reply says which legs it joined and
 the map draws each option separately.
 
@@ -255,7 +259,7 @@ than inventing a route. To change the map: edit a GeoJSON in `data/authored/`, r
 ## Tests
 
 ```bash
-python -m pytest tests -q      # 84 tests + 24 subtests: no network, no keys, no server
+python -m pytest tests -q      # 89 tests + 24 subtests: no network, no keys, no server
 ```
 
 | File | What it pins |
@@ -282,12 +286,15 @@ python -m pytest tests -q      # 84 tests + 24 subtests: no network, no keys, no
 
 ## Known limitations
 
-- **Opening hours are joined by name, not by id.** The knowledge base holds the published
-  tables (33 of 561 records have one), but the id join between the scraped records and the
-  graph nodes does not match, so hours are found by place name and three records the map
-  cannot name are unreachable. Fixing the key is the next data-plane change.
+- **Opening hours are joined by title, because the two ids do not correspond.** The
+  published tables cover 33 of 561 records, and a record is matched to a place by the name
+  both sources print — which holds for 326 of the 329 places. The three that no published
+  title matches are unreachable, and a scrape that stopped quoting the id used by the map is
+  not repairable from this side. (There used to be a node-id join here; it never matched a
+  single record, so it has been removed rather than left looking functional.)
 - **No indoor geometry.** A facility inside a building is reached through the building; the
-  reply gives the floor, not a corridor. Lifts and internal stairs are not modelled.
+  reply gives the floor, not a corridor. Lifts and internal stairs are not modelled, and
+  there are no doorway nodes, so every walk ends at the place itself.
 - **The walkway network has gaps.** Footways that pass metres apart without a shared node
   force detours, and a place standing more than 120 m from any walkway is attached by one
   straight connector rather than a path.

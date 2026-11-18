@@ -59,7 +59,6 @@ class Node:
     floor: str = ""
     name_zh: str = ""            # the Chinese name in traditional characters
     name_zh_cn: str = ""         # the same name in simplified characters
-    parent: str = ""             # the building this thing stands inside, if any
     service: str = ""            # e.g. "Accessible Toilet"
     accepts: tuple[str, ...] = ()  # canonical capabilities this point accepts
     source: str = ""             # "campus-map" -- provenance of the place
@@ -119,8 +118,7 @@ class CampusGraph:
                 category=n.get("category", ""),
                 building=n.get("building", ""),
                 floor=n.get("floor", ""),
-                parent=n.get("parent", ""),
-                name_zh=str(n.get("name_zh", "")),
+                    name_zh=str(n.get("name_zh", "")),
                 name_zh_cn=str(n.get("name_zh_cn", "")),
                 service=n.get("service", ""),
                 accepts=tuple(n.get("accepts", ())),

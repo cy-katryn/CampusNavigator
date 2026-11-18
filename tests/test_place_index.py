@@ -56,8 +56,7 @@ class StubStore:
 def make_graph() -> CampusGraph:
     nodes = {
         "L": Node(id="L", name="Pao Yue-Kong Library", lat=0.0, lng=0.0, kind="place"),
-        "AED": Node(id="AED", name="AED (Library)", lat=0.0, lng=0.0, kind="facility",
-                    parent="L"),
+        "AED": Node(id="AED", name="AED (Library)", lat=0.0, lng=0.0, kind="facility"),
         "X": Node(id="X", name="Elsewhere", lat=0.0, lng=0.0, kind="place"),
         "W": Node(id="W", name="", lat=0.0, lng=0.0, kind="waypoint"),
     }
@@ -93,11 +92,6 @@ class DensePlaceIndexTests(unittest.TestCase):
         # "library" is a word in the library's published name, so the place that merely
         # sits closest in the embedding space is a neighbour, not an alternative.
         index, _ = make_index([(0.90, "X"), (0.88, "L")])
-        self.assertEqual([node.id for node in index.resolve("library")], ["L"])
-
-    def test_facility_inside_a_named_building_is_dropped(self) -> None:
-        # The AED's own label contains the building name, so it scores alongside it.
-        index, _ = make_index([(0.90, "AED"), (0.88, "L")])
         self.assertEqual([node.id for node in index.resolve("library")], ["L"])
 
     def test_nothing_above_the_floor_is_no_match(self) -> None:

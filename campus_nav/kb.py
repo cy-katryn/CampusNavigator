@@ -89,7 +89,6 @@ class Doc:
     source: str                  # "campus-map"
     ref: str                     # the source record id
     fields: dict = field(default_factory=dict)
-    node_id: str = ""            # matching graph node, when the place is routable
 
     @property
     def hours(self) -> dict:
@@ -193,7 +192,6 @@ class KnowledgeBase:
 
     def __init__(self, docs: list[Doc] | None = None) -> None:
         self.docs: list[Doc] = docs or []
-        self._by_node: dict[str, Doc] = {}
         self._by_title: dict[str, Doc] = {}
         self._index: dict[str, list[int]] = {}
         self._lengths: list[int] = []
@@ -204,7 +202,6 @@ class KnowledgeBase:
 
     # -- construction ------------------------------------------------------
     def build(self) -> None:
-        self._by_node = {d.node_id: d for d in self.docs if d.node_id}
         self._by_title = {d.title.lower(): d for d in self.docs}
         self._index = {}
         self._lengths = []
@@ -221,12 +218,18 @@ class KnowledgeBase:
         self._avgdl = (sum(self._lengths) / len(self._lengths)) if self._lengths else 0.0
 
     @classmethod
-    def from_raw(cls, raw_dir: str | Path, graph=None) -> "KnowledgeBase":
+    def from_raw(cls, raw_dir: str | Path) -> "KnowledgeBase":
+        """Read the published records, joined to the map by *title*.
+
+        There used to be a node-id join here: the scraped record's poi_id was matched
+        against the graph's ref. It never matched once -- the graph carries short ids
+        ("POI_5bcd371552_10") and the scrape carries 24-character hex ones -- so the index it
+        built was always empty and every lookup fell through to the title. The title is what
+        the two sources genuinely share (326 of 329 node names are published titles), so it
+        is now the only join, in one place, by_title().
+        """
         raw = Path(raw_dir)
         docs: list[Doc] = []
-        node_by_ref: dict[str, str] = {}
-        if graph is not None:
-            node_by_ref = {n.ref: n.id for n in graph.nodes.values() if n.ref}
 
         campus_path = raw / "campus_map_pois.json"
         if campus_path.exists():
@@ -260,7 +263,6 @@ class KnowledgeBase:
                             "lng": rec.get("lng"),
                             "toilet_for_disabled": rec.get("toilet_for_disabled"),
                         },
-                        node_id=node_by_ref.get(rec.get("poi_id", ""), ""),
                     )
                 )
 
@@ -292,9 +294,6 @@ class KnowledgeBase:
         return [(score, self.docs[p]) for p, score in ranked[:k] if score >= min_score]
 
     # -- lookups -----------------------------------------------------------
-    def for_node(self, node_id: str) -> Doc | None:
-        return self._by_node.get(node_id)
-
     def by_title(self, title: str) -> Doc | None:
         return self._by_title.get((title or "").lower())
 

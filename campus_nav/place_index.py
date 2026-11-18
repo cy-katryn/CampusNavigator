@@ -120,7 +120,7 @@ def cjk_named(hits: list[tuple[float, Node]], probe: str) -> list[tuple[float, N
 
     Then, when the phrase names both a building and something standing in it, the building
     is the answer: the follower drop in resolve() applies the same rule, but it cannot fire
-    here because these published facility records leave the parent reference empty.
+    here: these facilities carry no building link, so nothing else can make the call.
     """
     def ends_with(name: str) -> bool:
         return any(part.strip().endswith(probe)
@@ -408,16 +408,6 @@ class PlaceIndex:
                 restricted = [(score, node) for score, node in hits if node.id in named]
                 if restricted:
                     hits = restricted
-
-        # A phrase that names a building also matches the facilities standing inside it,
-        # because their names contain the building label. Drop those followers; the
-        # building is the answer, and they remain reachable by naming them directly.
-        ids = {node.id for _, node in hits}
-        grouped = [
-            (score, node) for score, node in hits
-            if not (node.kind == "facility" and node.parent and node.parent in ids)
-        ]
-        hits = grouped or hits
 
         # A name whose every word appears in the query is the name that was said: "Block X
         # Sports Centre" is a building of its own, and answering it with "Block X" sends

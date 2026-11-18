@@ -458,7 +458,7 @@ class App:
         self.settings = get_settings()
         self.transcriber = LocalTranscriber()
         self.graph = CampusGraph.load(graph_path())
-        self.knowledge = KnowledgeBase.from_raw(RAW_DIR, self.graph)
+        self.knowledge = KnowledgeBase.from_raw(RAW_DIR)
         self.footprints = load_shapes(shapes_path())
         client = DeepSeekClient(self.settings) if self.settings.llm_available else None
         narrator = Narrator(client) if self.settings.narration_available else None
@@ -565,8 +565,7 @@ class App:
                     "lng": n.lng,
                     "kind": n.kind,
                     "category": n.category,
-                    "parent": n.parent,
-                    "building": n.building,
+                            "building": n.building,
                     "service": n.service,
                     "accepts": list(n.accepts),
                     "floor": n.floor,

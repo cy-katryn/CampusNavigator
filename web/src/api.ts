@@ -26,7 +26,7 @@ export async function sendChat(text: string, lang: string, endpoints?: Partial<R
   return (await response.json()) as ChatPayload;
 }
 
-export interface SettingsPayload {
+interface SettingsPayload {
   apiKey?: string | null;
   model?: string | null;
   embeddingsApiKey?: string | null;

@@ -12,27 +12,6 @@ export function hash01(text: string, salt: number): number {
   return ((h >>> 0) % 1000) / 1000;
 }
 
-/** Ray casting on a [lat, lng] ring: is this point inside that polygon? */
-export function pointInRing(lat: number, lng: number, ring: [number, number][]): boolean {
-  let hit = false;
-  for (let i = 0; i < ring.length - 1; i += 1) {
-    const [y1, x1] = ring[i];
-    const [y2, x2] = ring[i + 1];
-    if (y1 > lat !== y2 > lat) {
-      if (lng < x1 + ((lat - y1) * (x2 - x1)) / (y2 - y1)) hit = !hit;
-    }
-  }
-  return hit;
-}
-
-/** PolyU labels buildings with letters: Core A, Block L, Block VA. */
-export function shortCode(name: string): string {
-  const core = name.match(/^(?:Core|Block|Wing)\s+([A-Za-z0-9]+)/i);
-  if (core) return core[1].toUpperCase();
-  const alnum = name.replace(/[^A-Za-z0-9]/g, '');
-  return alnum.slice(0, 2).toUpperCase() || '·';
-}
-
 /* ------------------------------------------------------------------- legend
  *
  * The legend is the PolyU campus map's OWN taxonomy, not a shape invented for this
@@ -43,12 +22,12 @@ export function shortCode(name: string): string {
  * One key per chip. The key colours the pin, filters the layer, and labels the chip,
  * so an amenity that is added to the source appears in exactly one place in the code.
  */
-export interface LegendEntry {
+interface LegendEntry {
   key: string;
   label: string;
 }
 
-export interface LegendSection {
+interface LegendSection {
   id: string;
   label: string;
   entries: LegendEntry[];

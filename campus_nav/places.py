@@ -85,6 +85,27 @@ FACILITY_WORDS: dict[str, str] = {
     "drink": "water_refill", "thirsty": "water_refill", "bottle": "water_refill",
 }
 
+# How each capability is written as a *service label* by the campus map itself. The graph
+# stores the publisher's wording ("Catering Outlets", "Clinics", "Aed"), so a lookup on the
+# internal name silently finds nothing: "canteen" matched no node at all, and the reply only
+# reached the canteens because the meaning search happened to. A join has to be on the words
+# that are actually stored.
+CAPABILITY_LABELS: dict[str, tuple[str, ...]] = {
+    "canteen": ("catering", "canteen"),
+    "clinic": ("clinic",),
+    "defibrillator": ("aed",),
+    "toilet": ("toilet",),
+    "water_refill": ("water station",),
+    "lactation room": ("lactation",),
+    "prayer room": ("prayer",),
+    "bank": ("bank",),
+    "bookstore": ("bookstore", "bookshop"),
+    "postbox": ("postbox",),
+    "bus stop": ("bus stop",),
+    "lecture theatre": ("lecture theatre",),
+}
+
+
 # Wording that means "a facility", not "the building it sits in".
 SERVICE_WORDS: tuple[str, ...] = (
     "water", "refill", "aed", "defibrillator", "toilet", "washroom", "restroom",

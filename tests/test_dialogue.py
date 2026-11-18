@@ -9,7 +9,9 @@ from __future__ import annotations
 import unittest
 
 from campus_nav.config import Settings, graph_path
+from campus_nav import dialogue as dialogue_module
 from campus_nav.dialogue import Dialogue, place_legs, walk_minutes
+from campus_nav.nlu import Slots
 from campus_nav.graph import CampusGraph
 from campus_nav.place_index import PlaceIndex
 
@@ -172,6 +174,81 @@ class StopRoutingTests(unittest.TestCase):
         )
         self.assertEqual(len(routes), 1)
         self.assertFalse(routes[0].reachable)
+
+class JourneyStopsTests(unittest.TestCase):
+    """Stops that persist across turns, and a stop found by description."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.graph = CampusGraph.load(graph_path())
+        cls.places = PlaceIndex(cls.graph, OFFLINE)
+
+    def dialogue(self, origin: str, destination: str) -> Dialogue:
+        talk = Dialogue(self.graph, client=None, narrator=None, places=self.places)
+        talk.state.origin = self.node("Block L (Pao Yue-Kong Library)")
+        talk.state.destination = self.node("Block Y (Lee Shau Kee Building)")
+        return talk
+
+    def node(self, name: str) -> str:
+        for candidate in self.graph.nodes.values():
+            if candidate.name == name:
+                return candidate.id
+        raise AssertionError(name)
+
+    def test_a_stop_said_later_extends_the_journey(self) -> None:
+        # "Along the way, I want to pass through Block X" used to apply for one reply and
+        # then vanish; the journey is the thing being edited, so it keeps its stops.
+        talk = self.dialogue("library", "Block Y")
+        talk.handle("how do I get from the library to Block Y?")
+        talk._route_reply(Slots(intent="route", vias=["Block X"]))
+        self.assertEqual(talk.state.stops, [self.node("Block X")])
+        self.assertEqual(len(place_legs(self.graph, talk.state.last_route)), 2)
+
+    def test_naming_a_new_journey_forgets_the_old_stops(self) -> None:
+        talk = self.dialogue("library", "Block Y")
+        talk._route_reply(Slots(intent="route", vias=["Block X"]))
+        talk._route_reply(Slots(intent="route", origin_text="Block L (Pao Yue-Kong Library)",
+                               destination_text="Core A"))
+        self.assertEqual(talk.state.stops, [])
+
+    def test_no_stops_clears_them(self) -> None:
+        talk = self.dialogue("library", "Block Y")
+        talk._route_reply(Slots(intent="route", vias=["Block X"]))
+        self.assertTrue(talk.state.stops)
+        talk.handle("no stops, the direct route")
+        self.assertEqual(talk.state.stops, [])
+
+    def test_a_described_stop_is_inserted_with_its_detour(self) -> None:
+        # "I also want to get a quick breakfast along the way": the engine decides that
+        # breakfast is catering, and which canteen costs the least extra walking.
+        talk = self.dialogue("library", "Block Y")
+        reply = talk._stop_for_need(Slots(intent="facility_query", need="a quick breakfast"))
+        self.assertIsNotNone(reply, "a breakfast stop should be found near this walk")
+        self.assertIn("Added", reply.text)
+        self.assertEqual(len(talk.state.stops), 1, talk.state.stops)
+        self.assertIn(talk.state.stops[0], talk.state.last_route.path)
+
+    def test_a_stop_that_costs_too_much_is_offered_not_inserted(self) -> None:
+        talk = self.dialogue("library", "Block Y")
+        talk_module = dialogue_module
+        original = talk_module.STOP_DETOUR_M
+        talk_module.STOP_DETOUR_M = 0.0       # every detour is now too expensive
+        try:
+            reply = talk._stop_for_need(Slots(intent="facility_query", need="a quick breakfast"))
+        finally:
+            talk_module.STOP_DETOUR_M = original
+        self.assertIsNotNone(reply)
+        self.assertIn("would add", reply.text)
+        self.assertEqual(talk.state.stops, [], "nothing is inserted without consent")
+
+    def test_answering_a_question_keeps_the_walk_on_the_map(self) -> None:
+        # Turn 3 of a journey is often a question ("where is the nearest toilet?"). It used
+        # to clear the drawn route, which reads as the app forgetting the walk.
+        talk = self.dialogue("library", "Block Y")
+        talk.handle("how do I get from the library to Block Y?")
+        reply = talk.handle("where is the nearest AED?")
+        self.assertIsNone(reply.route, "a facility answer is not itself a route")
+        self.assertTrue(reply.routes, "but the walk stays on the map")
 
 if __name__ == "__main__":
     unittest.main()

@@ -28,6 +28,7 @@ from .nlu import (REOPEN, Slots, asks_for_everything, facility_words, names_dest
                   parse, parse_with_grammar, refers_to_last_distance, stair_request)
 from .place_index import PlaceIndex
 from .places import (
+    CAPABILITY_LABELS,
     SERVICE_WORDS,
     amenity_in_text,
     facility_capability,
@@ -50,7 +51,6 @@ class Reply:
     route: RouteResult | None = None
     slots: Slots | None = None
     notes: list[str] = field(default_factory=list)
-    comparison: dict | None = None
     narrated: bool = False        # True when the model wrote the prose
     # Structured places the reply is talking about, so a map or a card view can
     # render them without re-parsing the prose.
@@ -80,6 +80,9 @@ class SessionState:
     pending: str | None = None  # "origin" | "destination" | None
     avoid_stairs: bool = False
     last_facilities: FacilityResult | None = None
+    # The places this journey goes through, in order. Remembered across turns, so "and I
+    # want to pass through Block X" extends the walk instead of replacing it.
+    stops: list[str] = field(default_factory=list)
 
 
 def place_legs(graph: CampusGraph, route: RouteResult) -> list[tuple[str, str, float, bool]]:
@@ -182,6 +185,30 @@ _GREETING = re.compile(
     r"[s!,.?。，！？~]*$",
     re.I,
 )
+# "no stops", "the direct route": the walk without the places added along the way.
+_NO_STOPS = re.compile(
+    r"\b(?:no|without|drop|remove|forget|clear|skip)\b[^.!?]{0,24}\bstops?\b|"
+    r"\b(?:the\s+)?direct\s+(?:route|way)\b|\bgo\s+direct(?:ly)?\b|"
+    r"\bno\s+(?:more\s+)?(?:detours?|stops?)\b|"
+    r"唔使(?:再)?(?:經|经)|(?:不|唔)(?:再)?(?:經過|经过|经)|直接去",
+    re.I,
+)
+
+# A stop described by what it is for, rather than named: "get a quick breakfast along the
+# way". The discourse marker is what makes it a request about the *current* walk; without it
+# "where is the nearest canteen" is a question, not an instruction.
+_ALONG_THE_WAY = re.compile(
+    r"\b(?:along|on)\s+(?:the|my)\s+way\b|\ben\s+route\b|\bon\s+my\s+route\b|"
+    r"\bwhile\s+(?:i\s+)?(?:walk|walking|passing)\b|"
+    r"途中|沿途|順路|顺路|路上",
+    re.I,
+)
+
+# How much walking a stop found by description may add before it is offered instead of
+# inserted. Four hundred metres is about five minutes: past that, the user is choosing a
+# detour, and choosing is theirs to do.
+STOP_DETOUR_M = 400.0
+
 _THANKS = re.compile(
     r"^(?:thanks|thanks+you|thx|ty|cheers|gots+it|perfect|great|nice|"
     r"唔該|多谢|多謝|谢谢|謝s*謝)[s!,.?。，！？~]*$",
@@ -215,7 +242,7 @@ class Dialogue:
         """The facts the bot may state: opening hours and facility details."""
         if self._knowledge is None:
             try:
-                self._knowledge = KnowledgeBase.from_raw(RAW_DIR, self.graph)
+                self._knowledge = KnowledgeBase.from_raw(RAW_DIR)
             except (OSError, ValueError, KeyError):
                 # A missing or unreadable raw file must never break routing.
                 self._knowledge = KnowledgeBase([])
@@ -298,6 +325,13 @@ class Dialogue:
                 if role not in ("origin", "destination") or not node or node.kind == "waypoint":
                     raise ValueError("Choose a named place on the campus map.")
                 setattr(slots, role + "_text", node_id)
+        if endpoints is None and _NO_STOPS.search(text):
+            # "no stops", "just the direct route": drop the places added along the way and
+            # plan the walk again without them.
+            self.state.stops = []
+            if slots.intent == "out_of_scope":
+                slots.intent = "route"
+            slots.clear_stops = True
         intent = slots.intent
 
         if intent == "help":
@@ -315,9 +349,22 @@ class Dialogue:
             # the words and this line decides, from the map's own vocabulary.
             if not slots.item:
                 slots.item = amenity_in_text(slots.need or slots.subject)
+            if intent == "facility_query" and _ALONG_THE_WAY.search(text):
+                # "I also want a quick breakfast along the way" is not a question about where
+                # catering is; it is an instruction about the walk in progress.
+                inserted = self._stop_for_need(slots)
+                if inserted is not None:
+                    return inserted
             reply = self._hours(slots) if intent == "hours_query" else self._facilities(slots)
             if reply.facility_result:
                 self.state.last_facilities = reply.facility_result
+            if reply.routes or reply.route is not None:
+                return reply
+            if self.state.last_route is not None:
+                # Answering a question must not rub out the walk on the map. The route is
+                # re-attached as a *background* option: the reply's own text is about the
+                # question, and with one option there is nothing to choose between.
+                reply.routes = [self.state.last_route]
             return reply
         self.state.last_facilities = None
 
@@ -581,61 +628,25 @@ class Dialogue:
         )
 
     def _blocked(self) -> set[str]:
-        """Closed places, plus the doors of anything closed.
-
-        Closing a building has to close its entrances too, or "the library is closed"
-        would leave every way into the library open.
-        """
-        blocked = set(self.state.closed_nodes)
-        for node_id in list(blocked):
-            blocked.update(self._doors_of(node_id))
-        return blocked
-
-    def _doors_of(self, node_id: str) -> list[str]:
-        """The entrances grouped under a building."""
-        return [
-            node.id for node in self.graph.nodes.values()
-            if node.parent == node_id and node.kind == "entrance"
-        ]
+        """Places the user has reported closed."""
+        return set(self.state.closed_nodes)
 
     def _best_route(self, origin: str, destination: str, avoid: set[str] | None = None):
-        """Route to the cheapest way IN, not to the middle of the building.
-
-        Every door of the destination is a candidate goal. The shortest reachable
-        route wins, so "take me to Shaw Amenities Building" arrives at whichever
-        entrance is actually nearest from where you are. A building without doors
-        falls back to its own anchor. `avoid` adds link ids to close for this search
+        """The shortest walk to the destination. `avoid` closes link ids for this search
         only, which is how the alternatives are generated.
+
+        This used to consider every door of the destination as a candidate goal, and fall
+        back to the building anchor when all of them failed. That machinery could never
+        run: the graph has no `entrance` nodes, and the parent link it grouped them by was
+        discarded at build time. It is gone; a door-aware variant would be a data change
+        (authoring entrances), not a routing one.
         """
-        doors = self._doors_of(destination)
-        goals = doors if doors else [destination]
-        blocked = self._blocked()
-        closed_edges = set(self.state.closed_edges) | set(avoid or ())
-        best = None
-        for goal in goals:
-            candidate = search(
-                self.graph, origin, goal,
-                algorithm="astar",
-                closed_edges=closed_edges,
-                closed_nodes=blocked,
-                avoid_stairs=self.state.avoid_stairs,
-            )
-            if not candidate.reachable:
-                continue
-            if best is None or candidate.total_metres < best.total_metres:
-                best = candidate
-        if best is not None:
-            return best
-        if self.state.avoid_stairs:
-            # All actual entrances failed. The building centre is not another door.
-            return candidate
-        # No door is reachable: report the building itself, so the reply still says
-        # which closure is blocking the way rather than claiming the place vanished.
         return search(
             self.graph, origin, destination,
             algorithm="astar",
-            closed_edges=closed_edges,
-            closed_nodes=blocked,
+            closed_edges=set(self.state.closed_edges) | set(avoid or ()),
+            closed_nodes=self._blocked(),
+            avoid_stairs=self.state.avoid_stairs,
         )
 
     def _route_options(self, origin: str, destination: str, limit: int = 3) -> list[RouteResult]:
@@ -691,6 +702,105 @@ class Dialogue:
                 continue
             stops.append(stop)
         return stops, " ".join(notes)
+
+    def _stop_for_need(self, slots: Slots) -> Reply | None:
+        """Insert a stop that was *described* rather than named: "a quick breakfast on the way".
+
+        The engine makes both decisions the model cannot: which kind of place the words mean
+        (amenity wording first, meaning second), and which particular one -- by measuring the
+        detour each candidate would add to the walk already planned, and taking the smallest.
+
+        The reply states the detour it accepted. A stop inserted without a visible cost is a
+        guess wearing a number, and past STOP_DETOUR_M the choice belongs to the user: the
+        reply names the place and asks instead of bending the walk.
+        """
+        if not (self.state.origin and self.state.destination):
+            return None
+        need = (slots.need or slots.item or slots.subject or "").strip()
+        if not need:
+            return None
+        wanted = amenity_in_text(need)
+        candidates = self._service_matches(Slots(item=wanted)) if wanted else []
+        if not candidates:
+            # the same two machines as everywhere else: a published amenity first, then what
+            # the words mean
+            candidates = self.places.semantic_places(need)
+        candidates = [node for node in candidates
+                      if node.id not in (self.state.origin, self.state.destination)
+                      and node.id not in self.state.stops]
+        if not candidates:
+            return None
+
+        waypoints = [self.state.origin, *self.state.stops, self.state.destination]
+        legs = [self._best_route(a, b) for a, b in zip(waypoints, waypoints[1:])]
+        if any(not leg.reachable for leg in legs):
+            return None      # the walk itself is broken; the route reply explains that better
+
+        def off_route(node: Node) -> float:
+            """How far a candidate sits from the walk already planned -- screening only."""
+            return min(
+                (self.graph.node(point).distance_to(node)
+                 for leg in legs for point in leg.path),
+                default=0.0,
+            )
+
+        best: tuple[float, int, Node] | None = None
+        for node in sorted(candidates, key=off_route)[:4]:
+            for index, leg in enumerate(legs):
+                there = self._best_route(waypoints[index], node.id)
+                onward = self._best_route(node.id, waypoints[index + 1])
+                if not (there.reachable and onward.reachable):
+                    continue
+                detour = there.total_metres + onward.total_metres - leg.total_metres
+                if best is None or detour < best[0]:
+                    best = (detour, index, node)
+        if best is None:
+            return None
+
+        detour, index, node = best
+        total = sum(leg.total_metres for leg in legs)
+        label = wanted or need
+        if detour > STOP_DETOUR_M:
+            reply = Reply(
+                f'The closest {label} on this walk is {node.name}, and going through it would '
+                f'add {detour:.0f} m to a {total:.0f} m route. Say "add {node.name}" and I '
+                "will walk you through it.",
+                slots=slots,
+                notes=[f'stop detour {detour:.0f} m exceeds {STOP_DETOUR_M:.0f} m'],
+            )
+            reply.routes = [self.state.last_route] if self.state.last_route else []
+            return reply
+        self.state.stops.insert(index, node.id)
+        # "on the way" is the truthful wording when the detour is under five metres, which
+        # happens whenever the place stands on the walkway itself; "+0 m" reads like a bug.
+        cost = "on the way" if detour < 5 else f"adding {detour:.0f} m"
+        return self._route_reply(
+            slots, prefix=f"Added a stop at {node.name} for {label}, {cost}.",
+        )
+
+    def _remember_stops(self, slots: Slots, said: list[str], origin: str,
+                        goal: str) -> list[str]:
+        """The stops of this journey: the ones just said, plus the ones already remembered.
+
+        Three rules, and the whole lifecycle is these three:
+
+          * naming an origin or a destination starts a *new* journey, whose stops are the
+            ones said with it (usually none);
+          * a turn that only adds a stop extends the journey in progress -- "along the way,
+            I want to pass through Block X";
+          * "no stops" / "the direct route" clears them, in handle().
+
+        Without the first rule a remembered stop would silently follow you to the next
+        question; without the second, every stop would last exactly one reply.
+        """
+        known = ([] if (slots.mentions_places or getattr(slots, "clear_stops", False))
+                 else list(self.state.stops))
+        for stop in said:
+            if stop not in known:
+                known.append(stop)
+        known = [stop for stop in known if stop not in (origin, goal)]
+        self.state.stops = known
+        return known
 
     def _join(self, legs: list[RouteResult]) -> RouteResult:
         """Several searches stitched into one walk: the stop appears once, in order.
@@ -826,24 +936,23 @@ class Dialogue:
 
         previous_total = self.state.last_route.total_metres if self.state.last_route else None
 
-        # A building anchor sits at the polygon's centre, so a route to it ends with a
-        # straight hop through its own wall. When the building has doors, the honest
-        # destination is a door -- and A* decides which door is cheapest from here.
-        # A facility inside a building is reached by walking to the building. The walk
-        # ends there (or at its door) and the reply says which floor to look on -- we
-        # have no indoor geometry, so pretending the last 40 m is a corridor would be
-        # an invented route.
-        indoor_note = ""
+        # A facility inside a building is reached by walking to the building: there is no
+        # indoor geometry, so the walk ends there and the reply says which floor to look
+        # on. That note used to depend on a parent link the build discards, so it never
+        # appeared; the published building and floor fields were there all along. Note only:
+        # the goal stays the facility's own anchor, which is the building's coordinate.
         goal = destination
         place = self.graph.node(destination)
-        parent = place.parent
-        if place.kind != "entrance" and parent and parent in self.graph.nodes:
+        indoor_note = ""
+        if place.kind == "facility" and place.building and (place.building, place.floor) != (
+            place.name, ""
+        ):
             indoor_note = self._indoor_text(destination)
-            goal = parent
         # A stop on the way is two searches stitched into one walk: into the stop, then
         # out of it. Everything downstream (leg count, metre total, the drawn line, the
         # spoken summary) reads the joined result, so nothing has to know it was two.
         stops, via_note = self._via_stops(slots, origin, goal)
+        stops = self._remember_stops(slots, stops, origin, goal)
         if stops:
             routes = self._routed_via(origin, stops, goal)
         else:
@@ -929,7 +1038,7 @@ class Dialogue:
         narration = self._narrate(facts)
         reply = Reply(
             (prefix + "\n" if prefix else "") + text,
-            route=route, slots=slots, notes=notes, comparison=comparison, routes=routes,
+            route=route, slots=slots, notes=notes, routes=routes,
             spoken=narration.text if narration.ok else "",
             lead_prefix=prefix,
         )
@@ -1041,7 +1150,11 @@ class Dialogue:
                   and raw == doc.fields.get("category", "").lower()):
                 matches.append(node)
             elif (node.service.lower() in wanted_caps if slots.language == "zh" else
-                  any(cap and cap in node.service.lower() for cap in wanted_caps)):
+                  any(label in node.service.lower()
+                      for cap in wanted_caps
+                      for label in CAPABILITY_LABELS.get(cap, (cap,)))):
+                # joined on the map's own service wording: the graph says "Catering Outlets",
+                # not "canteen", and "Clinics", not "clinic"
                 matches.append(node)
         return matches
 
@@ -1049,7 +1162,8 @@ class Dialogue:
         # Some authored POI node IDs use shortened source IDs. Exact official
         # titles join those records without a fuzzy match to a different facility.
         kb = self.knowledge
-        return (kb.for_node(node.id) or kb.by_title(node.name)) if kb else None
+        # joined on the published title: that is the only key these two sources share
+        return kb.by_title(node.name) if kb else None
 
     @property
     def _default_reference(self) -> str | None:
@@ -1230,7 +1344,7 @@ class Dialogue:
         matches = [n for n in self.graph.nodes.values() if n.name.casefold() == doc.title.casefold()]
         campus = [n for n in matches if n.source == "campus-map"]
         matches = campus or matches
-        node = self.graph.nodes.get(doc.node_id) or (matches[0] if len(matches) == 1 else None)
+        node = matches[0] if len(matches) == 1 else None
         card = self._card(node) if node else {"node_id": "", "name": doc.title}
         card.update(name_zh=doc.fields.get("name_zh", ""), name_zh_cn=doc.fields.get("name_zh_cn", ""),
                     opening_hours=doc.hours, hours_today=today_hours(doc.hours),
@@ -1314,17 +1428,20 @@ class Dialogue:
 
         # 1) the question names something the map can resolve
         matching = self._service_matches(slots, slots.subject)
-        # 1a) ... and if it names one specific place ("the dental clinic"), retrieval
-        #     picks that one out of the group before anything is printed.
-        if len(matching) > 1 and slots.subject:
-            for _score, doc in kb.search(slots.subject, k=6, min_score=1.0):
-                narrowed = [n for n in matching if doc.node_id and n.id == doc.node_id]
-                if narrowed:
-                    matching = narrowed
-                    break
+        # 1a) ... and if the question names one specific place ("the dental clinic"), the
+        #     resolver picks that one out of the group before anything is printed. "The
+        #     canteen" names twenty-four of them, so nothing is narrowed and the list is the
+        #     answer. (This narrowed by the record's node id, which never matched a node, and
+        #     then by BM25 title score, which happily picked one canteen out of twenty-four.)
+        if len(matching) > 1 and (slots.subject or slots.item):
+            wanted = {node.id for node in matching}
+            named = [node for node in self.places.resolve(slots.subject or slots.item)
+                     if node.id in wanted]
+            if len(named) == 1:
+                matching = named
         if len(matching) > 1:
             # prefer the candidates that actually publish a table
-            documented = [n for n in matching if (kb.for_node(n.id) and kb.for_node(n.id).hours)]
+            documented = [n for n in matching if (kb.by_title(n.name) and kb.by_title(n.name).hours)]
             if documented:
                 matching = documented
         if len(matching) > 1:

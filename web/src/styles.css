@@ -76,7 +76,6 @@
   --cat-amenity-lactation:        #be185d;   /* pink                          */
   --cat-amenity-prayer:           #2f8f6b;   /* green                         */
   --cat-amenity-other:            #94a3b8;   /* grey                          */
-  --tree:                         #2f8f6b;
 
   /* -- the route -------------------------------------------------------------
      Not the brand red: the building walls are rust (109, 48, 16), so a red line
@@ -299,23 +298,15 @@ html, body {
 #map.basemap .fp-roof { stroke: var(--panel); stroke-width: 1.1; }
 
 /* with extruded blocks on screen, the schematic squares step aside */
-#map.footprints .node.building rect { display: none; }
-/* the letter moves onto the roof, so the schematic one is hidden */
-#map.footprints .node.building .node-code { display: none; }
 .roof-code {
   fill: var(--polyu-red-dark); font-size: 11px; font-weight: 700;
   font-family: var(--font); text-anchor: middle; pointer-events: none;
   paint-order: stroke; stroke: var(--panel); stroke-width: 2.4;
   stroke-linejoin: round;
 }
-#map.footprints .node-shadow, #map.footprints .tree { display: none; }
 #map.basemap .edge-casing { stroke: var(--panel); opacity: .75; stroke-width: 2.6; }
 #map.basemap .edge { stroke: var(--muted); opacity: .55; stroke-width: 1.1; }
 #map.basemap .edge-stairs { stroke: var(--accent); opacity: .7; }
-#map.basemap .node-shadow,
-#map.basemap .tree { display: none; }
-#map.basemap .node.building rect { fill: var(--panel); opacity: .62; stroke: var(--accent); }
-#map.basemap .node.building .node-code { fill: var(--polyu-red); stroke: none; }
 #map.basemap .node.facility circle { stroke: var(--panel); }
 #map.basemap .node-label { stroke: var(--panel); stroke-width: 3.2; }
 
@@ -339,26 +330,10 @@ html, body {
   stroke: var(--edge-stairs); stroke-width: 1.1;
   stroke-linecap: butt;
 }
+/* A cheap 2.5D hint lives in the footprint layer (fp-roof); these are the schematic
+   pins that appear on top of it. There is no .node.building any more: a node's kind is
+   place, facility or entrance -- the blocks themselves are footprints. */
 .node { cursor: pointer; }
-.node.building rect {
-  fill: var(--node); stroke: var(--node-line);
-  stroke-width: 1.4;
-  filter: drop-shadow(0 1px 2px var(--accent-ring));
-}
-/* a cheap 2.5D hint: a second block offset down-right, read as the shadowed face */
-/* the letter inside a building block: Core A, Block L, Block VA.
-   Sized to the pin it sits in -- the box is 9 map units now, so a 10.5px glyph
-   would spill out of it. */
-.node-code {
-  fill: var(--polyu-red-dark); font-size: 5.5px; font-weight: 700;
-  font-family: var(--font); text-anchor: middle; pointer-events: none;
-  paint-order: stroke; stroke: var(--panel); stroke-width: 1.1;
-  stroke-linejoin: round;
-}
-.node.entrance .node-code { fill: var(--on-accent); stroke: none; }
-.node-shadow { fill: var(--node-line); opacity: .28; }
-.node:hover .node-shadow { fill: var(--accent); opacity: .2; }
-.tree { fill: var(--tree); opacity: .35; }
 
 .node.entrance rect {
   fill: var(--accent); stroke: var(--on-accent);
@@ -379,7 +354,6 @@ html, body {
 .node.place.cat-offices rect   { stroke: var(--cat-offices); stroke-width: 1.8; }
 .node.place.cat-transport rect { stroke: var(--cat-transport); stroke-width: 1.8; }
 .node.place.cat-amenity-other rect { stroke: var(--cat-amenity-other); stroke-width: 1.8; }
-.node.place .node-code { fill: var(--accent-dark); stroke: none; }
 .node.facility circle {
   fill: var(--accent); stroke: var(--on-accent);
   stroke-width: 1.2;

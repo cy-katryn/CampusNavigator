@@ -24,7 +24,7 @@ const MAX_TILES = 42;
 /* Marker sizes in map units (metres on the ground), so they scale with the map like
    the buildings do. Halved from the original illustration: at 18 units a building pin
    covered most of the footprint it was pointing at. */
-const NODE_SIZE = { building: 9, place: 7, entrance: 6.5 } as const;
+const NODE_SIZE = { place: 7, entrance: 6.5 } as const;
 const SERVICE_RADIUS = 3.5;
 
 export interface ScaleInfo {
@@ -32,7 +32,7 @@ export interface ScaleInfo {
   label: string;
 }
 
-export interface MapOptions {
+interface MapOptions {
   onScale(info: ScaleInfo): void;
   onPlaceClick(node: GraphNode): void;
   onTip(text: string | null): void;
@@ -644,32 +644,10 @@ export class CampusMap {
         this.serviceGroups.push({ el: g, cat });
         g.appendChild(el('circle', { cx: p.x, cy: p.y, r: SERVICE_RADIUS }));
       } else {
+        // The kinds that reach here are "place" and "entrance" -- the blocks themselves are
+        // footprints, not nodes -- so the 2.5D shadow face and the decorative trees that
+        // the old "building" kind drew are gone with it.
         const size = NODE_SIZE[node.kind as keyof typeof NODE_SIZE];
-        // a shadowed face under the block: the cheapest honest nod to 2.5D
-        if (node.kind !== 'entrance' && node.kind !== 'place') {
-          g.appendChild(
-            el('rect', {
-              x: p.x - size / 2 + size * 0.19,
-              y: p.y - size / 2 + size * 0.19,
-              width: size,
-              height: size,
-              rx: size * 0.17,
-              class: 'node-shadow',
-            }),
-          );
-          for (let i = 0; i < 3; i += 1) {
-            const angle = hash01(node.id, i) * Math.PI * 2;
-            const radius = 13 + hash01(node.id, i + 10) * 11;
-            nodeLayer.appendChild(
-              el('circle', {
-                cx: p.x + Math.cos(angle) * radius,
-                cy: p.y + Math.sin(angle) * radius,
-                r: (1 + hash01(node.id, i + 20) * 0.8),
-                class: 'tree',
-              }),
-            );
-          }
-        }
         // A place no walkway reaches is still on the campus, so it is drawn -- with a
         // dashed ring, because it cannot be routed to.
         if (node.off_network) {
