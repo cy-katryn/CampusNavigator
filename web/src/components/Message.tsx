@@ -238,12 +238,8 @@ export function Message({ message, selection, onFacilityClick, onSelectRoute }: 
           <RouteOptions routes={payload.routes} selection={selection} onSelect={onSelectRoute} />
         ) : null}
 
-        {payload.narrated || payload.parser || tags.length ? (
+        {tags.length ? (
           <div className="flex flex-wrap gap-1.5">
-            {payload.narrated ? <span className={TAG + ' border-line-strong text-brand'}>prose: model · numbers: A*</span> : null}
-            {payload.parser ? (
-              <span className="text-[10px] italic text-muted opacity-75">understood by {payload.parser}</span>
-            ) : null}
             {tags.map((note, index) => (
               <span key={note + index} className={TAG}>
                 {note}

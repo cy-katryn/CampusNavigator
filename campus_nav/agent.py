@@ -260,7 +260,6 @@ class MapAgent:
         elif final:
             reply.spoken = final
             reply.narrated = True
-            reply.notes.append("the model chose the steps; the engine supplied every number")
         return reply
 
     def _refusals(self, final: str) -> list[str]:

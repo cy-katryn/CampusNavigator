@@ -268,11 +268,6 @@ def route_option(graph: CampusGraph, route, lang: str = "en-US") -> dict | None:
 
 
 
-def _parser_label(slots) -> str:
-    """Which layer decided this turn: "agent", or "grammar" when the model did not answer."""
-    return getattr(slots, "source", "") or ""
-
-
 def chat_payload(graph: CampusGraph, reply, lang: str = "en-US") -> dict:
     route = getattr(reply, "route", None)
     explicit = getattr(reply, "spoken", "")
@@ -313,12 +308,8 @@ def chat_payload(graph: CampusGraph, reply, lang: str = "en-US") -> dict:
         "lead": speech if structural else "",
         "speech": speech,
         "speech_lang": speech_lang,
-        "narrated": bool(getattr(reply, "narrated", False)),
         "notes": list(getattr(reply, "notes", []) or []),
         "intent": getattr(getattr(reply, "slots", None), "intent", ""),
-        # which NLU implementation produced these slots, and -- when it was the grammar --
-        # why the model was not the one answering
-        "parser": _parser_label(getattr(reply, "slots", None)),
         "route": route_payload(graph, route, speech_lang),
         "routes": [
             option

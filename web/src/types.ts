@@ -128,10 +128,10 @@ export interface ChatPayload {
   lead?: string;
   speech?: string;
   speech_lang?: string;
-  narrated?: boolean;
+
   notes?: string[];
   intent?: string;
-  parser?: string;
+
   route: RoutePayload | null;
   /** Every route worth offering, cheapest first. Empty when the reply has no route. */
   routes?: RouteOption[];
