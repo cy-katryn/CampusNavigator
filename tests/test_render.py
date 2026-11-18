@@ -76,6 +76,27 @@ class RenderTests(unittest.TestCase):
         self.assertNotIn("\n", said)
 
 
+class ClockTests(unittest.TestCase):
+    """One seam for "now", so a net can be deterministic and a test can pin a Tuesday."""
+
+    def test_a_pinned_clock_is_used_for_open_state(self) -> None:
+        import os
+        from unittest import mock
+        from campus_nav.kb import clock, open_state
+        with mock.patch.dict(os.environ, {"CAMPUS_NAV_NOW": "2025-06-11T10:00:00"}):
+            self.assertEqual(clock().strftime("%a %H:%M"), "Wed 10:00")
+            self.assertEqual(open_state({"Wed": ["07:30 - 20:30"]})[0], True)
+            self.assertEqual(open_state({"Wed": ["11:00 - 20:00"]})[0], False)
+
+    def test_an_explicit_time_outranks_the_pin(self) -> None:
+        import os
+        from datetime import datetime
+        from unittest import mock
+        from campus_nav.kb import HKT, clock
+        with mock.patch.dict(os.environ, {"CAMPUS_NAV_NOW": "2025-06-11T10:00:00"}):
+            self.assertEqual(clock(datetime(2025, 6, 12, 9, tzinfo=HKT)).day, 12)
+
+
 class EmptyTranslationTests(unittest.TestCase):
     """An empty string is a translation; only an absent one falls back."""
 

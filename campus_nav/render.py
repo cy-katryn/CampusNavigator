@@ -154,16 +154,27 @@ def speech(reply, graph: CampusGraph, language: str = "en-US") -> str:
     # Chinese facility answers are spoken from the catalogue (that is what the dedicated
     # layer always did); every other language keeps the model's own sentence, and reaches
     # for the catalogue only when there is nothing to say.
-    if facility and (language in ("zh-HK", "zh-CN") or not explicit):
-        return facility
-    if explicit:
+    chinese = language in ("zh-HK", "zh-CN")
+    # A narratable reply says so, and then its sentence is the answer in *any* language: the
+    # model was given the language, the facts, and the guards, and its sentence passed them.
+    # Anything it did not write (or wrote in the wrong script) falls through to the catalogue.
+    if getattr(reply, "narrated", False) and explicit:
         return explicit
+    if facility and (chinese or not explicit):
+        return facility
+    # In Chinese the structured arms outrank the reply's own sentence, because that sentence
+    # is written by the dialogue layer (and by the narrator) in English: preferring it made
+    # every Chinese route answer English -- "由Block V去圖書館點行" was answered with
+    # "Yes, you can walk from Block V ...". English prefers the narration, which reads better
+    # than the receipt.
     clarification = getattr(reply, "clarification", None)
-    if clarification and language in ("zh-HK", "zh-CN"):
+    if clarification and chinese:
         return clarification_speech(clarification, graph, language)
     route = getattr(reply, "route", None)
-    if route is not None and route.reachable and route.path:
+    if route is not None and (chinese or not explicit):
         return route_speech(route, graph, language)
+    if explicit:
+        return explicit
     if route is not None:
         return route_speech(route, graph, language)
     facilities = getattr(reply, "facilities", None) or []

@@ -38,6 +38,7 @@ network call, so the demo works with the Wi-Fi off.
 from __future__ import annotations
 
 import json
+import os
 import math
 import re
 from dataclasses import dataclass, field
@@ -96,6 +97,25 @@ class Doc:
 
 
 # ----------------------------------------------------------------- opening hours
+def clock(when: datetime | None = None) -> datetime:
+    """The time to judge "open now" by: the argument, else the wall clock, else the pin.
+
+    CAMPUS_NAV_NOW exists because the alternative was invisible: the replay net compared
+    answers recorded at one time of day with answers produced at another, so a canteen
+    crossing 10:30 turned "closed now" into "open now" and the net reported a difference
+    that no code change had caused. One seam, and the net is deterministic.
+    """
+    if when is not None:
+        return when.astimezone(HKT)
+    pinned = os.environ.get("CAMPUS_NAV_NOW", "").strip()
+    if pinned:
+        try:
+            return datetime.fromisoformat(pinned).replace(tzinfo=HKT)
+        except ValueError:
+            pass
+    return datetime.now(HKT)
+
+
 def parse_slots(values) -> list[tuple[str, str]]:
     """["07:30 - 20:30"] -> [("07:30", "20:30")]; "CLOSED" -> [].
 
@@ -156,7 +176,7 @@ def open_state(raw: dict, when: datetime | None = None) -> tuple[bool | None, st
     """
     if not raw:
         return None, "no opening hours are published for this place"
-    now = (when or datetime.now(HKT)).astimezone(HKT)
+    now = clock(when)
     day = _DAYS[now.weekday()]
     slots = parse_slots(raw.get(day))
     if not slots:
@@ -175,7 +195,7 @@ def today_hours(raw: dict, when: datetime | None = None) -> str:
     """'07:30-20:30' for today, 'closed', or '' when the table does not say."""
     if not raw:
         return ""
-    now = (when or datetime.now(HKT)).astimezone(HKT)
+    now = clock(when)
     day = _DAYS[now.weekday()]
     slots = parse_slots(raw.get(day))
     if slots:

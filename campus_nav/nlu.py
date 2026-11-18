@@ -448,6 +448,11 @@ _SEEKS_NEAREST = re.compile(r"^(?:where|which|what|find|show|locate)\b.*?\b(?:cl
 _CLOSED_WORD = re.compile(r"\bclosed\b", re.I)
 _HAS_CJK = re.compile(r"[\u3400-\u9fff]")
 
+
+def has_cjk(text: str) -> bool:
+    """Whether these words are written in Chinese -- which decides the display language."""
+    return bool(_HAS_CJK.search(text or ""))
+
 # --- facility: which service does the question name, if any --------------------
 # One pattern, not two. These are the words a person uses for the things this map
 # carries; the captured group is the item the dialogue then looks up.

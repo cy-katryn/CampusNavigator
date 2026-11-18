@@ -19,6 +19,56 @@ the spacing in the data keeps the concatenation identical in every language.
 from __future__ import annotations
 
 COPY: dict[str, dict[str, str]] = {
+    # -- replies that are not about a place ----------------------------------
+    "speech.greeting": {
+        "en-US": "Hi! Tell me where you are and where you want to go -- or ask me to find "
+                 "something ({examples}).",
+        "zh-HK": "你好！講低你喺邊、想去邊，或者叫我幫你搵嘢（例如{examples}）。",
+        "zh-CN": "你好！告诉我你在哪里、想去哪里，或者让我帮你找设施（例如{examples}）。",
+    },
+    "facility.reference_note": {
+        "en-US": "Distances are measured from {reference} -- tell me where you are and I "
+                 "will re-rank them.",
+        "zh-HK": "距離係由{reference}起計——同我講你喺邊，我會按你嘅位置重新排序。",
+        "zh-CN": "距离从{reference}起算——告诉我你在哪里，我会按你的位置重新排序。",
+    },
+    "speech.thanks": {
+        "en-US": "Any time. Where next?",
+        "zh-HK": "唔使客氣。跟住想去邊？",
+        "zh-CN": "不客气。接下来想去哪里？",
+    },
+    "speech.reset": {
+        "en-US": "Cleared. Where would you like to go?",
+        "zh-HK": "已清除。你想去邊度？",
+        "zh-CN": "已清除。你想去哪里？",
+    },
+    "speech.out_of_scope": {
+        "en-US": "I can find walking routes on the PolyU campus, point you to facilities "
+                 "(AEDs, water, accessible toilets, canteens) and quote their opening hours. "
+                 'Try: "how do I get from Block Y to the library?" or '
+                 '"where is the nearest AED?"',
+        "zh-HK": "我可以幫你搵理大校園嘅步行路線、指你去設施（AED、飲水機、暢通易達洗手間、"
+                 "飯堂），同埋查開放時間。試下講：「由Y座去圖書館點行？」或者「最近嘅AED喺邊？」",
+        "zh-CN": "我可以帮你找理大校园的步行路线、指你去设施（AED、饮水机、无障碍洗手间、"
+                 "食堂），并查询开放时间。试试说：“从Y座到图书馆怎么走？”或者“最近的AED在哪里？”",
+    },
+    "speech.help": {
+        "en-US": "I can do three things:\n"
+                 '  1. Route between campus places, e.g. "from Block Y to the library"\n'
+                 '  2. Re-plan around closures: "the link between Core C and Core D is closed"\n'
+                 '  3. Find facilities and their opening hours: "is the canteen open?"\n'
+                 "Ask in English or Chinese. If I do not know something, I will say so.",
+        "zh-HK": "我可以做三件事：\n"
+                 "  1. 計畫校園內嘅步行路線，例如「由Y座去圖書館點行？」\n"
+                 "  2. 遇到封路時重新計畫：「Core C同Core D之間嗰段封咗」\n"
+                 "  3. 搵設施同開放時間：「飯堂開咗未？」\n"
+                 "用中文或者英文問都可以。唔知嘅話我會直接講唔知。",
+        "zh-CN": "我可以做三件事：\n"
+                 "  1. 规划校园内的步行路线，例如“从Y座到图书馆怎么走？”\n"
+                 "  2. 遇到封路时重新规划：“Core C和Core D之间那段封了”\n"
+                 "  3. 找设施和开放时间：“食堂开了吗？”\n"
+                 "用中文或者英文提问都可以。不知道的话我会直说。",
+    },
     # -- the route, spoken ---------------------------------------------------
     "speech.route": {
         "en-US": "From {origin} to {destination} is about {metres} metres.",

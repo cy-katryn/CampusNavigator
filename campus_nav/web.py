@@ -283,9 +283,10 @@ def chat_payload(graph: CampusGraph, reply, lang: str = "en-US") -> dict:
     explicit = getattr(reply, "spoken", "")
     facilities = getattr(reply, "facilities", [])
     facility_lead = facility_speech(reply, graph, lang) if lang in ("zh-HK", "zh-CN") else None
-    speech_lang = "en-US"
-    if facility_lead or (lang in ("zh-HK", "zh-CN") and not explicit and (clarification or route is not None)):
-        speech_lang = lang
+    # The language the user asked in is the language they are answered in. There used to be
+    # a heuristic here that kept English whenever the reply carried its own sentence --
+    # which is precisely when a Chinese user was answered in English.
+    speech_lang = lang
     # One renderer decides what is said: model narration if there is any, then the
     # catalogue (campus_nav/copy.py), then the reply's own words. This call used to be a
     # chain of `if lang ==` arms spread over three modules.
@@ -611,7 +612,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 with LOCK:
                     reply = self.app.dialogue_for(self._session()).handle(
-                        text, endpoints=payload.get("endpoints"))
+                        text, endpoints=payload.get("endpoints"), language=lang)
             except ValueError as exc:
                 return self._json({"error": str(exc)}, 400)
             except (PlaceIndexError, EmbeddingError, PineconeError) as exc:

@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 
 from . import copy
 from .graph import CampusGraph
-from .kb import HKT, parse_slots
+from .kb import HKT, clock, parse_slots
 from .local_names import building_name, floor_name, has_service_label, place_name, service_label
 
 DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
@@ -55,7 +55,7 @@ def requested_day(question: str) -> str:
             if full.startswith(word[:3]):
                 return DAYS[index]
     if re.search(r"明[天日]|聽日|听日|tomorrow", said, re.I):
-        return DAYS[(datetime.now(HKT) + timedelta(days=1)).weekday()]
+        return DAYS[(clock() + timedelta(days=1)).weekday()]
     return ""
 
 

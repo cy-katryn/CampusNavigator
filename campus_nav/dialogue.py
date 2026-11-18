@@ -16,6 +16,7 @@ import difflib
 import re
 from dataclasses import dataclass, field
 
+from . import copy
 from .config import RAW_DIR, get_settings
 from .format import FacilityResult, requested_day
 from . import lexical
@@ -25,8 +26,9 @@ from . import hours
 from .landmarks import landmarks_along
 from .llm import DeepSeekClient
 from .narrate import Facts, Narration, Narrator
-from .nlu import (REOPEN, Slots, asks_for_everything, facility_words, names_destination,
-                  parse, parse_with_grammar, refers_to_last_distance, stair_request)
+from .nlu import (REOPEN, Slots, asks_for_everything, facility_words, has_cjk,
+                  names_destination, parse, parse_with_grammar, refers_to_last_distance,
+                  stair_request)
 from .place_index import PlaceIndex
 from .places import (
     CAPABILITY_LABELS,
@@ -35,6 +37,7 @@ from .places import (
     facility_capability,
     human_category,
 )
+from .local_names import service_label
 from .replies import Reply, RouteClarification
 from .search import RouteResult, compare, search
 
@@ -171,8 +174,10 @@ _GREETING = re.compile(
 STOP_DETOUR_M = 400.0
 
 _THANKS = re.compile(
-    r"^(?:thanks|thanks+you|thx|ty|cheers|gots+it|perfect|great|nice|"
-    r"唔該|多谢|多謝|谢谢|謝s*謝)[s!,.?。，！？~]*$",
+    r"^(?:thanks|thanks+you|thank\s*you|thx|ty|cheers|gots+it|perfect|great|nice|"
+    r"唔該|多谢|多謝|谢谢|謝\s*謝)"
+    # Cantonese puts a particle after the thanks: 唔該晒, 多謝你
+    r"(?:晒|哂|你|您)?[s!,.?。，！？~]*$",
     re.I,
 )
 
@@ -189,6 +194,9 @@ class Dialogue:
         self._places = places
         # Recent exchanges, for the parser only: the engine reads its own state, not this.
         self.history: list[dict] = []
+        # The language the current question is answered in, set per turn from the request.
+        # Not part of the journey state: it belongs to the message being answered.
+        self.display_language = "en-US"
         # Built lazily: 876 documents cost about a tenth of a second, which is too
         # much to spend on a /help or /quit, and nothing for a real question.
         self._knowledge = knowledge
@@ -262,7 +270,8 @@ class Dialogue:
             endpoints[role] = {"text": phrase, "id": node_id}
         return endpoints
 
-    def handle(self, text: str, *, endpoints: dict | None = None) -> Reply:
+    def handle(self, text: str, *, endpoints: dict | None = None,
+               language: str | None = None) -> Reply:
         """Answer one message, and remember the exchange for the next one.
 
         The parser is given the last few turns (see nlu.parse), because referring
@@ -270,7 +279,7 @@ class Dialogue:
         only meaningful in context. The engine's state stays the authority for facts; the
         conversation is only what the *language* layer reads.
         """
-        reply = self._handle(text, endpoints=endpoints)
+        reply = self._handle(text, endpoints=endpoints, language=language)
         self._remember(text, reply)
         return reply
 
@@ -313,16 +322,31 @@ class Dialogue:
         self.history.append({"role": "assistant", "content": said[:400]})
         del self.history[:-HISTORY_TURNS]
 
-    def _handle(self, text: str, *, endpoints: dict | None = None) -> Reply:
+    @staticmethod
+    def _language(text: str, language: str | None) -> str:
+        """The language to write in: the request's own, else what the words are written in.
+
+        This layer writes a handful of sentences that are not about any place (a greeting,
+        the "I can only do campus things" reply). They were English whatever the user
+        spoke, because nothing here knew the display language -- the browser does, so it
+        says so, and the words themselves are the fallback.
+        """
+        if language in ("en-US", "zh-HK", "zh-CN"):
+            return language
+        return "zh-HK" if has_cjk(text) else "en-US"
+
+    def _handle(self, text: str, *, endpoints: dict | None = None,
+                language: str | None = None) -> Reply:
+        spoken_language = self._language(text, language)
+        # The facts handed to the model carry it: the model cannot see the browser, so the
+        # engine has to say which language the answer is owed in.
+        self.display_language = spoken_language
         if endpoints is None and _GREETING.match(text.strip()):
-            warm = ", ".join(self._warm_examples())
-            return Reply(
-                "Hi! Tell me where you are and where you want to go -- or ask me to find "
-                f"something ({warm}).",
-                notes=["greeting"],
-            )
+            warm = ", ".join(self._warm_examples(spoken_language))
+            return Reply(copy.t("speech.greeting", spoken_language, examples=warm),
+                         notes=["greeting"])
         if endpoints is None and _THANKS.match(text.strip()):
-            return Reply("Any time. Where next?", notes=["greeting"])
+            return Reply(copy.t("speech.thanks", spoken_language), notes=["greeting"])
         if endpoints is None:
             digest = self._context_digest()
             context = ([digest] if digest else []) + self.history
@@ -351,10 +375,10 @@ class Dialogue:
         intent = slots.intent
 
         if intent == "help":
-            return self._help()
+            return self._help(spoken_language)
         if intent == "reset":
             self.reset()
-            return Reply("Cleared. Where would you like to go?")
+            return Reply(copy.t("speech.reset", spoken_language))
 
         if slots.facility_choice is not None:
             return self._facility_choice(slots)
@@ -419,28 +443,17 @@ class Dialogue:
                 slots=slots,
             )
 
-        return Reply(
-            "I can find walking routes on the PolyU campus, point you to facilities "
-            "(AEDs, water, accessible toilets, canteens) and quote their opening hours. "
-            "Try: \"how do I get from Block Y to the library?\" or "
-            "\"where is the nearest AED?\"",
-            slots=slots,
-        )
+        return Reply(copy.t("speech.out_of_scope", spoken_language), slots=slots)
 
     # -- pieces ------------------------------------------------------------
-    def _warm_examples(self) -> list[str]:
-        """Three real amenity words from this map, for the greeting."""
-        return facility_words(self.graph)[:3] or ["a nearby amenity"]
+    def _warm_examples(self, language: str = "en-US") -> list[str]:
+        """Three real amenity words from this map, in the language being spoken."""
+        words = facility_words(self.graph)[:3] or ["a nearby amenity"]
+        return [service_label(word, language) for word in words]
 
-    def _help(self) -> Reply:
-        return Reply(
-            "I can do three things:\n"
-            "  1. Route between campus places, e.g. \"from Block Y to the library\"\n"
-            "  2. Re-plan around closures: \"the link between Core C and Core D is closed\"\n"
-            "  3. Find facilities and their opening hours: \"is the canteen open?\"\n"
-            "Ask in English or Chinese. If I do not know something, I will say so.",
-            notes=[f"graph: {self.graph.summary()}"],
-        )
+    def _help(self, language: str = "en-US") -> Reply:
+        return Reply(copy.t("speech.help", language),
+                     notes=[f"graph: {self.graph.summary()}"])
 
     def _preferred_matches(self, text: str) -> list[Node]:
         """The places a phrase names, best first, from the embedding index.
@@ -1103,6 +1116,7 @@ class Dialogue:
             blocking=[self._describe_blocking()] if not route.reachable else [],
             options=options,
             option_metres=option_metres,
+            language=self.display_language,
         )
 
     def _narrate(self, facts: Facts) -> Narration:
@@ -1349,11 +1363,6 @@ class Dialogue:
         spoken += "."
         if len(matching) > 1:
             spoken += f" There are {len(matching)} on the map; the others are on screen."
-        if slots.unknown_origin:
-            # The distances are measured from a map reference because nobody said where the
-            # user is. Say that instead of quietly implying they are standing at Core P.
-            spoken += (" I do not know where you are starting from -- tell me and I will "
-                       "re-rank these from there.")
         info = FacilityResult("list", raw, len(matching), reference or "", rows=cards,
                               route_origin=reference if slots.facility_origin else "")
         reply = Reply("\n".join(lines), slots=slots, facilities=cards, spoken=spoken,
@@ -1368,6 +1377,7 @@ class Dialogue:
             reachable=True,
             need=raw or slots.subject or "",
             match_count=len(matching),
+            user_location_known=not slots.unknown_origin,
             reference=self.graph.node(reference).name if reference else "",
             best={
                 "name": best["name"],
@@ -1377,19 +1387,28 @@ class Dialogue:
                 "hours_today": best["hours_today"],
                 "open_now": best["open_now"],
             },
+            language=self.display_language,
         ))
         self._attach_narration(reply, narration)
         if narration.ok:
             reply.spoken = narration.text
-        if slots.unknown_origin and reference:
+        # The engine's guarantee that the measurement is stated: always for the catalogue's
+        # own sentence, and for a narrated one only when the model did not mention the
+        # reference place itself (then repeating it would say the same thing twice).
+        narrated = bool(getattr(reply, "narrated", False))
+        needs_note = (not narrated) or (
+            self.graph.node(reference).name not in (reply.spoken or ""))
+        if slots.unknown_origin and reference and needs_note:
             # Not in the model's facts on purpose: this is an instruction about the
             # conversation, so it is appended rather than left to the prose. Worded as a
             # statement about the *measurement*, not about the user's location -- the model
             # reading "mapped at the same location as Core P" as "right where you are" made
-            # the two halves contradict each other.
-            reply.spoken = (reply.spoken + f" Distances are measured from "
-                            f"{self.graph.node(reference).name} -- tell me where you are and "
-                            "I will re-rank them.").strip()
+            # the two halves contradict each other. Said once, and in the language the
+            # answer is owed in: this sentence used to exist twice in English, once inside
+            # the template and once here, so a Chinese answer ended in English.
+            reply.spoken = (reply.spoken + " " + copy.t(
+                "facility.reference_note", self.display_language,
+                reference=self.graph.node(reference).name)).strip()
         return reply
 
     def _facility_choice(self, slots):

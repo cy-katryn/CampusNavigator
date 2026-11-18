@@ -107,7 +107,10 @@ def ask(talk, slots):
                 "\nSource: PolyU campus map.")
         line = (timetable(card, day, "en-US") if day
                 else f'Today: {card["hours_today"] or "no hours published"}')
-        spoken = f'{card["name"]}. {line}. {why}.'
+        # The "open until ..." fact is about now, not about the day that was asked about.
+        right_now = (f'Right now: {why}.' if day
+                     else f'{why[:1].upper()}{why[1:]}.')
+        spoken = f'{card["name"]}. {line}. {right_now}'
         return Reply(text, slots=slots, facilities=[card] if card.get("node_id") else [],
                      spoken=spoken,
                      facility_result=FacilityResult("hours", rows=[card], day=day))
@@ -168,8 +171,11 @@ def ask(talk, slots):
             # the day thrown away -- which is how "on Tuesday" used to be answered.
             line = (timetable(card, day, "en-US") if day
                     else f'Today: {card["hours_today"] or "closed"}')
-            spoken = (f'{card["name"]}. {line}. '
-                      f'{reason[:1].upper()}{reason[1:]}.')
+            # When a day was asked, the "open until ..." fact is about *now*, not about that
+            # day: saying "Sunday 12:00-22:00. open until 23:00" invites a wrong reading.
+            right_now = (f'Right now: {reason}.' if day
+                         else f'{reason[:1].upper()}{reason[1:]}.')
+            spoken = f'{card["name"]}. {line}. {right_now}'
             return Reply(text, slots=slots, facilities=[card], spoken=spoken,
                          facility_result=FacilityResult("hours", rows=[card], day=day))
         return Reply(

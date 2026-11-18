@@ -11,6 +11,9 @@ It runs offline (grammar parser, built-in name scorer, no network, no keys) beca
 diff needs determinism, not model prose. Pass --live to use the configured model instead, and
 read the differences with that in mind: the model phrases sentences differently every run.
 
+The clock is pinned (see campus_nav.kb.clock): answers say "open now" or "closed now", and a
+canteen crossing 10:30 between two runs once produced a diff that no code change had caused.
+
 Usage
 -----
     python tools/replay.py                       # print what the app answers today
@@ -22,11 +25,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+# 10:00 on a Wednesday: mid-morning, mid-week, nothing opening or closing across the run.
+# --live keeps the real clock, because a live answer is about now by definition.
+if "--live" not in sys.argv:
+    os.environ.setdefault("CAMPUS_NAV_NOW", "2025-06-11T10:00:00")
 
 from campus_nav.config import Settings, get_settings, graph_path   # noqa: E402
 from campus_nav.dialogue import Dialogue                          # noqa: E402
@@ -93,7 +102,9 @@ def record(graph: CampusGraph, index: PlaceIndex, client: DeepSeekClient | None,
         talk = Dialogue(graph, client=client, narrator=narrator, places=index)
         turns = []
         for message in case["turns"]:
-            reply = talk.handle(message)
+            # The request's language, exactly as the browser sends it. Without it the engine
+            # can only guess from the script, and a zh-CN case was answered with zh-HK wording.
+            reply = talk.handle(message, language=case["lang"])
             route = reply.route
             turns.append({
                 "ask": message,
