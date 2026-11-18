@@ -309,6 +309,9 @@ def chat_payload(graph: CampusGraph, reply, lang: str = "en-US") -> dict:
         "speech": speech,
         "speech_lang": speech_lang,
         "notes": list(getattr(reply, "notes", []) or []),
+        # Why the assistant's own sentence was not used. Diagnostics only: the UI does not
+        # render this, and it is never spoken.
+        "review": list(getattr(reply, "review", []) or []),
         "intent": getattr(getattr(reply, "slots", None), "intent", ""),
         "route": route_payload(graph, route, speech_lang),
         "routes": [

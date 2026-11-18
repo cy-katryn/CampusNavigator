@@ -78,7 +78,10 @@ Rules:
 5. If the user asks for a step-free route, or mentions a wheelchair, stairs or steps, call
    path() with avoid_stairs true. Never say a step-free route does not exist unless a path()
    call with avoid_stairs true returned reachable false.
-6. Answer in {language}. Never mention tools, tool results, ids or JSON to the user."""
+6. Call path() (or facilities()) in this turn before you state any distance, time or count,
+   even when the conversation above already contains it: the numbers above are a memory, and
+   they may no longer be true.
+7. Answer in {language}. Never mention tools, tool results, ids or JSON to the user."""
 
 
 def _tool(name: str, description: str, properties: dict, required: list[str]) -> dict:
@@ -254,14 +257,15 @@ class MapAgent:
                 return None
             # Nothing from the engine to fall back on (the model answered without a tool).
             # The sentence is kept but not trusted: it is not marked narrated, and the review
-            # note says what was wrong with it.
+            # says what was wrong with it.
             return Reply(final, slots=slots, spoken=final,
-                         narrated=not refused, notes=list(refused))
+                         narrated=not refused, review=list(refused))
         reply = Reply(
             base.text,
             route=base.route,
             slots=slots,
-            notes=list(base.notes) + list(refused),
+            notes=list(base.notes),
+            review=list(refused),
             facilities=list(base.facilities),
             routes=list(base.routes),
             lead_prefix=base.lead_prefix,
@@ -281,13 +285,22 @@ class MapAgent:
         """Why the assistant's sentence may not be spoken, or nothing when it may.
 
         Three checks, on the sentence itself: the language asked for, numbers that came out
-        of a tool result, and no claim about where the user is.
+        of the engine, and no claim about where the user is.
+
+        The numbers may come from the tool results *of this turn* or from what the assistant
+        itself already said in this conversation: those were engine figures when they were
+        written, so repeating them is recall, not invention. Observed without this: the same
+        question asked twice -- "圖書館去Block Z點行" in zh-CN and then zh-HK -- was answered
+        the second time from the conversation above, no tool was called, and a correct
+        sentence was refused as "ungrounded number(s): 419, 6, 499, 492".
         """
         if not final:
             return []
+        said_before = [turn.get("content", "") for turn in self.dialogue.history
+                       if turn.get("role") == "assistant"]
         reasons = narrate.problems(
             final,
-            self._payloads,
+            self._payloads + said_before,
             self.dialogue.display_language,
             location_known=bool(self.dialogue.state.origin),
         )

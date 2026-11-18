@@ -81,7 +81,7 @@ function Summary({ payload }: { payload: ChatPayload }) {
   // triangle, and both readers who saw it assumed the details were broken.
   return (
     <summary className="summary text-[11.5px] tracking-[0.04em] text-muted hover:text-ink">
-      {'route breakdown \u00b7 ' + (bits.length ? bits.join(' \u00b7 ') : 'the numbers')}
+      {'route breakdown \u00b7 ' + (bits.length ? bits.join(' \u00b7 ') : 'details')}
     </summary>
   );
 }

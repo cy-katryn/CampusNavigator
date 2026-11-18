@@ -35,3 +35,6 @@ class Reply:
     # wording -- leaving it in the collapsed details hid the cause of the answer.
     lead_prefix: str = ""
     facility_result: FacilityResult | None = None
+    # Why the assistant's own sentence was not used, when that happens. Diagnostics for the
+    # transcript's review notes -- never shown in the conversation, and never spoken.
+    review: list[str] = field(default_factory=list)

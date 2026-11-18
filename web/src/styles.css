@@ -258,6 +258,9 @@ html, body {
    thin grey overlay, and the fake shadows/trees disappear because the map already
    has its own. */
 .tile { pointer-events: none; filter: var(--basemap-grey); }
+/* Every tile in view failed (offline, blocked, throttled): drop the layer and let the flat
+   map background show, rather than leaving gaps between the ones that did arrive. */
+#map.no-tiles #layer-tiles { display: none; }
 
 /* ------------------------------------------------------- extruded footprints
    Three flat tones are all the illustration trick needs: a lit roof, a wall in

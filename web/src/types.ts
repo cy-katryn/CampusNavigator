@@ -130,6 +130,8 @@ export interface ChatPayload {
   speech_lang?: string;
 
   notes?: string[];
+  /** Diagnostics: why the assistant's own sentence was not used. Never rendered. */
+  review?: string[];
   intent?: string;
 
   route: RoutePayload | null;

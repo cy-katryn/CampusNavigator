@@ -100,6 +100,11 @@ export class CampusMap {
   private routes: RouteOption[] = [];
   private selectedRoute = 0;
   private facilities: FacilityCard[] = [];
+  // Basemap tiles are kept between draws, keyed by z/x/y: re-creating them on every pan
+  // frame blanked the edges of the map while they reloaded, and asked the tile server for
+  // pictures it had already sent.
+  private tiles = new Map<string, SVGImageElement>();
+  private tileFailures = new Set<string>();
 
   constructor(svg: SVGSVGElement, opts: MapOptions) {
     this.svg = svg;
@@ -107,6 +112,16 @@ export class CampusMap {
     this.svg.classList.toggle('basemap', this.basemap);
     this.svg.classList.toggle('no-links', !this.showLinks);
     this.bindInteractions();
+    // The panel changes shape when the window does; nothing else redraws on a resize, and a
+    // stale aspect is exactly what produced the empty bands.
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(() => {
+        this.matchAspect();
+        this.applyView();
+      });
+      observer.observe(this.svg);
+      this.teardown.push(() => observer.disconnect());
+    }
   }
 
   dispose(): void {
@@ -388,7 +403,35 @@ export class CampusMap {
       w: (maxLng - minLng) * METRES_PER_DEG_LAT * cos,
       h: (maxLat - minLat) * METRES_PER_DEG_LAT,
     };
+    this.matchAspect();
     this.applyView();
+  }
+
+  /**
+   * Make the view the shape of the panel.
+   *
+   * The view is measured in metres, so its aspect came from the campus footprint; the panel
+   * is whatever shape the window is. An <svg> whose viewBox aspect differs letterboxes, which
+   * left two empty bands down the sides -- no map, no basemap, just background. Growing the
+   * short side fills the panel and keeps every drawn distance true (never stretch: the scale
+   * bar would lie).
+   */
+  private matchAspect(): void {
+    const rect = this.svg.getBoundingClientRect();
+    const v = this.view;
+    if (!rect.width || !rect.height || !(v.w > 0) || !(v.h > 0)) return;
+    const target = rect.width / rect.height;
+    const current = v.w / v.h;
+    if (!(target > 0) || Math.abs(current - target) < 0.01) return;
+    if (current > target) {
+      const h = v.w / target;
+      v.y -= (h - v.h) / 2;
+      v.h = h;
+    } else {
+      const w = v.h * target;
+      v.x -= (w - v.w) / 2;
+      v.w = w;
+    }
   }
 
   private project(lat: number, lng: number): Point {
@@ -454,41 +497,71 @@ export class CampusMap {
   private drawTiles(): void {
     const layer = layerOf('layer-tiles');
     if (!layer) return;
-    layer.innerHTML = '';
-    if (!this.basemap || !this.bounds) return;
+    if (!this.basemap || !this.bounds) {
+      this.tiles.forEach((node) => node.remove());
+      this.tiles.clear();
+      return;
+    }
 
     const z = this.tileZoom();
+    const span = 2 ** z;
     const nw = this.unproject(this.view.x, this.view.y);
     const se = this.unproject(this.view.x + this.view.w, this.view.y + this.view.h);
-    const x0 = Math.floor(tileXOf(nw.lng, z));
-    const x1 = Math.floor(tileXOf(se.lng, z));
-    const y0 = Math.floor(tileYOf(nw.lat, z));
-    const y1 = Math.floor(tileYOf(se.lat, z));
-    if ((x1 - x0 + 1) * (y1 - y0 + 1) > MAX_TILES) return; // too far out: skip
+    const clamp = (value: number) => Math.max(0, Math.min(span - 1, value));
+    const x0 = clamp(Math.floor(tileXOf(nw.lng, z)));
+    const x1 = clamp(Math.floor(tileXOf(se.lng, z)));
+    const y0 = clamp(Math.floor(tileYOf(nw.lat, z)));
+    const y1 = clamp(Math.floor(tileYOf(se.lat, z)));
+    if ((x1 - x0 + 1) * (y1 - y0 + 1) > MAX_TILES) return; // too far out: keep what is there
 
+    const wanted = new Set<string>();
     for (let x = x0; x <= x1; x += 1) {
       for (let y = y0; y <= y1; y += 1) {
+        const key = z + '/' + x + '/' + y;
+        wanted.add(key);
+        let node = this.tiles.get(key);
+        if (!node) {
+          if (this.tileFailures.has(key)) continue;   // do not ask twice for a dead tile
+          node = el('image', {
+            href: TILE_URL.replace('{z}', String(z))
+              .replace('{x}', String(x))
+              .replace('{y}', String(y)),
+            preserveAspectRatio: 'none',
+            class: 'tile',
+          }) as SVGImageElement;
+          node.addEventListener('error', () => {
+            this.tileFailures.add(key);
+            this.tiles.get(key)?.remove();
+            this.tiles.delete(key);
+            // Every tile in view has failed: say so once, quietly, instead of leaving a
+            // half-drawn basemap behind the campus.
+            this.svg.classList.toggle('no-tiles',
+              wanted.size > 0 && [...wanted].every((name) => this.tileFailures.has(name)));
+          });
+          this.tiles.set(key, node);
+          layer.appendChild(node);
+        }
+        // Position every draw: the view may have moved without the tile set changing.
         const top = latAtTileY(y, z);
         const bottom = latAtTileY(y + 1, z);
         const left = lngAtTileX(x, z);
         const right = lngAtTileX(x + 1, z);
         const a = this.project(top, left);
         const b = this.project(bottom, right);
-        layer.appendChild(
-          el('image', {
-            href: TILE_URL.replace('{z}', String(z))
-              .replace('{x}', String(x))
-              .replace('{y}', String(y)),
-            x: a.x,
-            y: a.y,
-            width: b.x - a.x,
-            height: b.y - a.y,
-            preserveAspectRatio: 'none',
-            class: 'tile',
-          }),
-        );
+        node.setAttribute('x', String(a.x));
+        node.setAttribute('y', String(a.y));
+        node.setAttribute('width', String(b.x - a.x));
+        node.setAttribute('height', String(b.y - a.y));
       }
     }
+    // Drop what scrolled out of view, so the layer keeps only what is on screen.
+    this.tiles.forEach((node, key) => {
+      if (!wanted.has(key)) {
+        node.remove();
+        this.tiles.delete(key);
+      }
+    });
+    if (this.tiles.size) this.svg.classList.remove('no-tiles');
   }
 
   // -- 2.5D building blocks ------------------------------------------------
@@ -748,6 +821,7 @@ export class CampusMap {
     const w = Math.max(Math.max(...xs) + pad - x, 200);
     const h = Math.max(Math.max(...ys) + pad - y, 160);
     this.view = { x, y, w, h };
+    this.matchAspect();
     this.applyView();
   }
 

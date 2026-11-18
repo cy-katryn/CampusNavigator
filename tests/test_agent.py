@@ -126,7 +126,8 @@ class AgentTests(unittest.TestCase):
                                text="It is about 400 metres, roughly 8 minutes.")
         reply = self.talk(client).handle("how far is it?", language="en-US")
         self.assertNotIn("400", reply.spoken)
-        self.assertTrue(any("sentence refused" in note for note in reply.notes), reply.notes)
+        self.assertTrue(any("sentence refused" in note for note in reply.review), reply.review)
+        self.assertEqual(reply.notes, [], "a refusal is a review note, not a visible tag")
         self.assertIn("128", reply.spoken, "the engine's own distance was not used")
 
     def test_a_sentence_in_the_wrong_language_is_replaced(self) -> None:
@@ -135,7 +136,7 @@ class AgentTests(unittest.TestCase):
                                text="The nearest toilet is in Core P.")
         reply = self.talk(client).handle("邊度有洗手間？", language="zh-HK")
         self.assertNotIn("The nearest toilet", reply.spoken)
-        self.assertTrue(any("sentence refused" in note for note in reply.notes), reply.notes)
+        self.assertTrue(any("sentence refused" in note for note in reply.review), reply.review)
 
     def test_step_free_wording_reaches_the_router(self) -> None:
         # The tool's avoid_stairs argument used to write only the slots, and the router reads
@@ -153,14 +154,33 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(sum(1 for segment in route.segments if segment.stairs), 0,
                          "a step-free request still routed through steps")
 
+    def test_a_repeated_question_may_reuse_the_numbers_it_was_already_given(self) -> None:
+        # Observed in a demo: the same question asked twice (zh-CN, then zh-HK) was answered
+        # the second time from the conversation above with no tool call, and a *correct*
+        # sentence was refused as "ungrounded number(s): 419, 6, 499, 492". Those numbers had
+        # come out of the engine one turn earlier, so they are recall, not invention.
+        library = self.places.resolve("Pao Yue-Kong Library")[0].id
+        block_z = self.places.resolve("Block Z")[0].id
+        first = self.talk(ScriptedClient([[_call("path", src=library, dest=block_z)]],
+                                        text="从图书馆去 Block Z 大约 419 米，步行约 6 分钟。"))
+        started = first.handle("圖書館去Block Z點行", language="zh-CN")
+        self.assertEqual(started.review, [], started.review)
+        # Second turn: no tool call at all, same numbers.
+        talk = self.talk(ScriptedClient([], text="由圖書館去 Block Z，大約 419 米，行約 6 分鐘。"))
+        talk.history = list(first.history)
+        talk.state = first.state
+        reply = talk.handle("圖書館去Block Z點行", language="zh-HK")
+        self.assertEqual(reply.review, [], reply.review)
+        self.assertTrue(reply.narrated, "a recalled-but-correct sentence should be used")
+        self.assertIn("419", reply.spoken)
+
     def test_a_refused_sentence_with_nothing_to_fall_back_on_is_flagged_not_trusted(self) -> None:
-        # A search-only answer has no engine sentence to substitute, so the model's words are
-        # kept but not trusted: the reply is not marked narrated and the note says why.
         client = ScriptedClient([[_call("search", name="圖書館")]],
                                text="The library is Block L.")
         reply = self.talk(client).handle("圖書館喺邊？", language="zh-HK")
         self.assertFalse(getattr(reply, "narrated", False))
-        self.assertTrue(any("sentence refused" in note for note in reply.notes), reply.notes)
+        self.assertTrue(any("sentence refused" in note for note in reply.review), reply.review)
+        self.assertEqual(reply.notes, [], "a refusal is not a visible tag")
 
 
 if __name__ == "__main__":
