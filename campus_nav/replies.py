@@ -1,4 +1,4 @@
-"""What a turn produces: the reply, and the question it may be asking instead.
+"""What a turn produces: the reply, and the places and routes it talks about.
 
 These used to live in dialogue.py, which meant hours.py could not describe a reply without
 importing the dialogue that owns it. A plain data module has no such problem, and it keeps
@@ -11,14 +11,6 @@ from dataclasses import dataclass, field
 from .format import FacilityResult
 from .nlu import Slots
 from .search import RouteResult
-
-
-@dataclass
-class RouteClarification:
-    role: str
-    query: str = ""
-    candidates: tuple[str, ...] = ()
-    known_place: str = ""
 
 
 @dataclass
@@ -42,5 +34,4 @@ class Reply:
     # the reason a route changed, so "Closed Catering Outlets." goes first, in one fixed
     # wording -- leaving it in the collapsed details hid the cause of the answer.
     lead_prefix: str = ""
-    clarification: RouteClarification | None = None
     facility_result: FacilityResult | None = None

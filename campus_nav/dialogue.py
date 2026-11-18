@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from . import copy
 from .config import RAW_DIR, get_settings
-from .format import FacilityResult, requested_day
+from .format import FacilityResult, requested_day, walk_minutes
 from . import lexical
 from .graph import CampusGraph, Node
 from .kb import KnowledgeBase, hours_summary, open_state, today_hours
@@ -38,7 +38,7 @@ from .places import (
     human_category,
 )
 from .local_names import service_label
-from .replies import Reply, RouteClarification
+from .replies import Reply
 from .search import RouteResult, compare, search
 
 
@@ -93,19 +93,10 @@ def place_legs(graph: CampusGraph, route: RouteResult) -> list[tuple[str, str, f
     return legs
 
 
-# A comfortable campus walking pace: 4.5 km/h. Used only to turn the measured metres into
-# "about N minutes", which is the number a person actually plans with.
 # How many messages of history the parser sees: two exchanges is enough to resolve "the
 # nearest one" or "make it go via X", and short enough that an old turn cannot be mistaken
 # for the current question.
 HISTORY_TURNS = 6
-
-WALK_MPS = 1.25
-
-
-def walk_minutes(metres: float) -> int:
-    """Minutes at a comfortable pace, never less than one."""
-    return max(1, round(metres / WALK_MPS / 60))
 
 
 def fmt_route(graph: CampusGraph, route: RouteResult) -> str:
@@ -192,6 +183,15 @@ class Dialogue:
         self.narrator = narrator
         self.state = SessionState()
         self._places = places
+        # The model-first path (agent.py). Built lazily, because the client may be replaced
+        # when a key is entered in the settings dialog.
+        self._agent = None
+        # Whether this turn may use the model for anything besides the agent loop. The agent
+        # turns it off when the model is unreachable, so the grammar fallback does not ask
+        # the same dead endpoint a second and third time.
+        self._llm_ok_for_turn = True
+        # The agent writes the prose itself; narration would ask the model again.
+        self.narrate = True
         # Recent exchanges, for the parser only: the engine reads its own state, not this.
         self.history: list[dict] = []
         # The language the current question is answered in, set per turn from the request.
@@ -218,6 +218,16 @@ class Dialogue:
                 # A missing or unreadable raw file must never break routing.
                 self._knowledge = KnowledgeBase([])
         return self._knowledge
+
+    @property
+    def agent(self):
+        """The model-first assistant, or None when no model is configured."""
+        if self.client is None:
+            return None
+        if self._agent is None:
+            from .agent import MapAgent
+            self._agent = MapAgent(self)
+        return self._agent
 
     # -- public ------------------------------------------------------------
     def _interpret_pending_place(self, text: str, slots: Slots) -> None:
@@ -274,11 +284,20 @@ class Dialogue:
                language: str | None = None) -> Reply:
         """Answer one message, and remember the exchange for the next one.
 
-        The parser is given the last few turns (see nlu.parse), because referring
-        expressions -- "the nearest one", "make it go via Core P", "and the toilet?" -- are
-        only meaningful in context. The engine's state stays the authority for facts; the
-        conversation is only what the *language* layer reads.
+        With a model configured, the model drives the turn through the tools in `agent.py`;
+        the grammar answers only when there is no model, when the endpoints came from the map
+        (a click is not language), or when the model could not be reached at all. The
+        engine's state stays the authority for facts in either case.
         """
+        self._llm_ok_for_turn = self.client is not None
+        if endpoints is None:
+            agent = self.agent
+            if agent is not None:
+                reply = agent.handle(text, language)
+                if reply is not None:
+                    self._remember(text, reply)
+                    return reply
+                self._llm_ok_for_turn = False
         reply = self._handle(text, endpoints=endpoints, language=language)
         self._remember(text, reply)
         return reply
@@ -350,7 +369,9 @@ class Dialogue:
         if endpoints is None:
             digest = self._context_digest()
             context = ([digest] if digest else []) + self.history
-            slots = parse(text, self.graph, self.client, self.places, context)
+            slots = parse(text, self.graph,
+                          self.client if self._llm_ok_for_turn else None,
+                          self.places, context)
             self._interpret_pending_place(stair_request(text)[0], slots)
         else:
             # The selections replace only the place slots. Keep the original
@@ -586,7 +607,6 @@ class Dialogue:
         self.state.pending = role
         known_id = self.state.destination if role == "origin" else self.state.origin
         known = self.graph.node(known_id).name if known_id else ""
-        clarification = RouteClarification(role, query, candidates, known)
         if candidates:
             prompt = f'"{query}" could be several places: {", ".join(candidates)}. Which one?'
         elif query:
@@ -601,7 +621,7 @@ class Dialogue:
         if known:
             other_role = "Destination" if role == "origin" else "Starting point"
             prompt += f" {other_role}: {known}."
-        return Reply(prompt, clarification=clarification)
+        return Reply(prompt)
 
     def _near_names(self, text: str, limit: int = 3) -> list[str]:
         """The closest published names to a phrase the resolver would not accept.
@@ -725,7 +745,12 @@ class Dialogue:
             text = (phrase or "").strip()
             if not text:
                 continue
-            hits = self._preferred_matches(text)
+            # A node id is a place, not something to resolve: the model's `path` tool passes
+            # the ids `search` returned, and re-embedding an id lands on unrelated neighbours.
+            if text in self.graph.nodes and self.graph.node(text).kind != "waypoint":
+                hits = [self.graph.node(text)]
+            else:
+                hits = self._preferred_matches(text)
             if not hits:
                 notes.append(f'There is no place called "{text}" here, so the route skips it.')
                 continue
@@ -1120,7 +1145,7 @@ class Dialogue:
         )
 
     def _narrate(self, facts: Facts) -> Narration:
-        if self.narrator is None:
+        if self.narrator is None or not self.narrate or not self._llm_ok_for_turn:
             return Narration(False, reason="no narrator configured")
         return self.narrator.narrate(facts)
 

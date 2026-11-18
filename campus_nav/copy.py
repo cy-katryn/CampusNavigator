@@ -102,39 +102,6 @@ COPY: dict[str, dict[str, str]] = {
         "zh-HK": "按而家嘅限制，搵唔到路線。你可以睇下畫面上嘅其他選擇。",
         "zh-CN": "按当前条件找不到路线。你可以查看屏幕上的其他选项。",
     },
-    # -- a clarifying question, spoken ---------------------------------------
-    "speech.ask.origin": {
-        "en-US": "Where are you starting from?",
-        "zh-HK": "你想由邊度出發？",
-        "zh-CN": "你从哪里出发？",
-    },
-    "speech.ask.destination": {
-        "en-US": "Where would you like to go?",
-        "zh-HK": "你想去邊度？",
-        "zh-CN": "你想去哪里？",
-    },
-    "speech.ask.known_destination": {
-        "en-US": "Destination: {place}.",
-        "zh-HK": "目的地係{place}。",
-        "zh-CN": "目的地是{place}。",
-    },
-    "speech.ask.known_origin": {
-        "en-US": "Starting point: {place}.",
-        "zh-HK": "起點係{place}。",
-        "zh-CN": "起点是{place}。",
-    },
-    "speech.ask.unknown": {
-        "en-US": 'I do not know "{query}". ',
-        "zh-HK": "我搵唔到「{query}」。",
-        "zh-CN": "我找不到“{query}”。",
-    },
-    "speech.ask.ambiguous": {
-        "en-US": '"{query}" could be several places: {names}. ',
-        "zh-HK": "「{query}」可能係以下幾個地方：{names}。",
-        "zh-CN": "“{query}”可能指以下几个地点：{names}。",
-    },
-    # Punctuation is language too: a full stop and a list separator are not universal.
-    "speech.list_separator": {"en-US": ", ", "zh-HK": "、", "zh-CN": "、"},
     # -- a facility answer ---------------------------------------------------
     "place.with_location": {
         "en-US": "{name} ({location})",

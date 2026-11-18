@@ -17,6 +17,15 @@ from .local_names import building_name, floor_name, has_service_label, place_nam
 
 DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
+# A comfortable campus walking pace: 4.5 km/h. Used to turn measured metres into "about N
+# minutes", the number a person actually plans with.
+WALK_MPS = 1.25
+
+
+def walk_minutes(metres: float) -> int:
+    """Minutes at a comfortable pace, never less than one."""
+    return max(1, round(metres / WALK_MPS / 60))
+
 
 @dataclass
 class FacilityResult:

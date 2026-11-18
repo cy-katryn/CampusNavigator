@@ -177,10 +177,15 @@ def resolve_scored(graph: CampusGraph, text: str) -> list[tuple[float, Node]]:
         # label it only gives an address, e.g. Toilet (Block V).
         if tail and node.kind == "place" and re.fullmatch(r"(?:block|wing|core) [a-z]+", head):
             best = max(best, score(tail))
-        if node.name_zh:
-            best = max(best, score(node.name_zh.lower()))
-        if node.name_zh_cn:
-            best = max(best, score(node.name_zh_cn.lower()))
+        for alias in (node.name_zh, node.name_zh_cn):
+            if not alias or alias.strip().casefold() == node.name.strip().casefold():
+                # Some records repeat the English name as the Chinese one. Scoring that copy
+                # whole is the one way a bracketed address can reach the name tier, and it
+                # made "forest" score "Z Café (Halal by The Forest)" at 0.66 while the places
+                # actually called "The Forest" scored 0.39 -- a phrase that names WHERE a
+                # café stands outranking the places it is named after.
+                continue
+            best = max(best, score(alias.lower()))
         if needle == node.name.lower():
             best = max(best, 96)          # typed out in full, brackets and all
         if best == 0 and tail:

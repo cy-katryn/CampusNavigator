@@ -271,14 +271,13 @@ def route_option(graph: CampusGraph, route, lang: str = "en-US") -> dict | None:
 
 
 def _parser_label(slots) -> str:
-    """'llm', or 'grammar (model abstained)' and friends: which layer decided, and why."""
+    """'agent', or 'grammar (model abstained)' and friends: which layer decided, and why."""
     source = getattr(slots, "source", "") or ""
     note = (getattr(slots, "parse_note", "") or "").strip()
     return f"{source} ({note})" if source and note else source
 
 
 def chat_payload(graph: CampusGraph, reply, lang: str = "en-US") -> dict:
-    clarification = getattr(reply, "clarification", None)
     route = getattr(reply, "route", None)
     explicit = getattr(reply, "spoken", "")
     facilities = getattr(reply, "facilities", [])
@@ -301,7 +300,7 @@ def chat_payload(graph: CampusGraph, reply, lang: str = "en-US") -> dict:
     # (the same sentence that gets spoken). The UI leads with that and puts the
     # segment table / A* statistics behind a details toggle, so the interface does not
     # hand the user a receipt when a key is missing and a sentence when one is present.
-    structural = facility_lead or explicit or route is not None or facilities or (clarification and speech_lang != "en-US")
+    structural = facility_lead or explicit or route is not None or facilities
     cards = list(facilities or [])
     if lang in ("zh-HK", "zh-CN"):
         cards = [

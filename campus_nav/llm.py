@@ -6,8 +6,9 @@ machine without a network install step.
 
 Design notes that matter for the report
 ---------------------------------------
-* We ask for JSON in the prompt and parse it defensively (`extract_json`)
-  rather than relying on native tool-calling.
+* Two callers, one transport. The slot parser asks for JSON in the prompt and
+  parses it defensively (`extract_json`); the map assistant (`agent.py`) uses
+  native tool-calling. Both read the same `LLMResult`.
 * The API rate-limits under load, so 429/5xx are retried with exponential
   backoff, and every failure is returned as a `LLMResult(ok=False)` instead of
   raising -- the dialogue layer always has a grammar fallback to fall back to.
@@ -35,6 +36,9 @@ class LLMResult:
     latency_ms: int = 0
     attempts: int = 0
     usage: dict = field(default_factory=dict)
+    # OpenAI-style tool calls, exactly as the provider returned them. Empty when the model
+    # answered in prose instead -- which is the normal end of an agent turn.
+    tool_calls: list[dict] = field(default_factory=list)
 
     def json(self) -> dict | None:
         return extract_json(self.text) if self.ok else None
@@ -93,6 +97,8 @@ class DeepSeekClient:
         temperature: float = 0.0,
         max_tokens: int = 400,
         retries: int = 3,
+        tools: list[dict] | None = None,
+        tool_choice: str | None = None,
     ) -> LLMResult:
         if not self.settings.llm_available:
             return LLMResult(ok=False, error="LLM disabled or no DEEPSEEK_API_KEY set")
@@ -104,6 +110,11 @@ class DeepSeekClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if tools:
+            # "auto" is the only choice worth offering here: the model must be free to answer
+            # a greeting without calling anything.
+            payload["tools"] = tools
+            payload["tool_choice"] = tool_choice or "auto"
         headers = {
             "Authorization": f"Bearer {self.settings.api_key}",
             "Content-Type": "application/json",
@@ -122,15 +133,19 @@ class DeepSeekClient:
                 with urllib.request.urlopen(req, timeout=self.settings.timeout_s) as resp:
                     body = json.loads(resp.read().decode("utf-8"))
                 choice = (body.get("choices") or [{}])[0]
-                text = (choice.get("message") or {}).get("content") or ""
+                message = choice.get("message") or {}
+                text = message.get("content") or ""
+                calls = message.get("tool_calls") or []
+                ok = bool(text.strip()) or bool(calls)
                 return LLMResult(
-                    ok=bool(text.strip()),
+                    ok=ok,
                     text=text,
                     model=body.get("model", self.settings.model),
                     latency_ms=int((time.monotonic() - started) * 1000),
                     attempts=attempt,
                     usage=body.get("usage") or {},
-                    error="" if text.strip() else "empty completion",
+                    error="" if ok else "empty completion",
+                    tool_calls=list(calls),
                 )
             except urllib.error.HTTPError as exc:
                 detail = ""

@@ -32,31 +32,37 @@ never the application. The server prints which path is live at startup, and
 
 | layer | primary | fallback | without it |
 |---|---|---|---|
-| understanding | LLM → JSON slots (`nlu.parse_with_llm`) | regex grammar (`nlu.parse_with_grammar`) | fewer phrasings understood; nothing breaks |
+| conversation | tool-calling assistant (`agent.py`) | grammar dialogue (`dialogue.py` + `nlu.parse_with_grammar`) | fewer phrasings understood; nothing breaks |
 | name identity | embeddings + vector index (`place_index.py`) | built-in word scorer (`lexical.py`) | exact-ish names still resolve; no paraphrases |
 | facts | BM25 over 561 campus-map records (`kb.py`) | — (always local) | — |
 | routing | A* + UCS over the walkway graph (`search.py`) | — (always local, never a model) | — |
-| wording | guarded LLM narration (`narrate.py`) | templates in `dialogue.py` | plainer sentences |
+| wording | the assistant's own sentence | templates in `dialogue.py` | plainer sentences |
 
 **The model is given no vocabulary at all.** Three vocabularies exist in this app — the 589
 places on the map, the 52 services it publishes, and the words people use for what they want
 ("a swim", "somewhere to eat", "feel sick") — and only the engine can see any of them. So the
-parser is asked to *report the user's words*, never to classify them:
+assistant is given tools, not a catalogue:
 
 ```
-message ──> model: intent + need/origin/destination/via/closed, verbatim ──> engine
-                                                                             │
-                            ┌────────────────────────────────────────────────┴──────────────┐
-               names an amenity? ("AED", "canteen")      names a place? ("Block V")       neither ("a swim")
-                            │                                     │                        │
-                    service search (52 services,          name resolution (589          meaning search over
-                    counts, hours, distances)             names, embeddings)            the same embeddings
+message ──> model chooses tools ──> engine executes and returns facts
+                 │                        │
+        search(name) ─────────────────────┤ real ids, names, buildings (names or descriptions)
+        ask(question) ────────────────────┤ the turn ends with one question
+        path(src, dest, via) ─────────────┤ A* route, metres, minutes
+        facilities(item, near) ───────────┤ service search, hours, distances
+        hours(place, when) ───────────────┤ quoted timetable, or "not published"
+        close(place) ─────────────────────┴ closure + re-plan
+
+without a model: grammar slots ──> the same engine functions
 ```
 
 That split is the whole design. Earlier the model was handed the amenity list and told to
 choose from it, so any need without a label got the nearest wrong one — "I want to have a
 swim" became *water station*, confidently. It is not that the model is weak: it was asked a
-question whose answer requires the campus, and it cannot see the campus.
+question whose answer requires the campus, and it cannot see the campus. The assistant may
+therefore report *what the user said* and choose *which tool to call*; it may never invent a
+place id, a distance or a timetable, and every id it passes to `path()` is validated against
+the graph first.
 
 ### Where the bilingual code lives
 
@@ -156,11 +162,12 @@ block in `web/src/styles.css`; icons come from [Lucide](https://lucide.dev). Tha
 stylesheet keeps only what a utility cannot express: the palette, the avatar's paint and
 state animations, and the map layers the drawing code creates by class name.
 
-With a DeepSeek key in `.env` the model parses every message into slots
-(intent, origin, destination, closures, stair restrictions) and phrases the reply; it
-never chooses the route and never states a fact that was not computed. Without a key the
-deterministic grammar does the same job for the phrasings it knows, and the app behaves
-identically — it simply understands fewer ways of asking.
+With a DeepSeek key in `.env` the model drives each turn through the tools in
+`campus_nav/agent.py` (`search`, `ask`, `path`, `facilities`, `hours`, `close`, `reset`) and
+phrases the answer; it never chooses the route and never states a fact that was not
+computed. Without a key the deterministic grammar parses the message and calls the same
+engine functions (`dialogue.py`), and the app behaves identically — it simply understands
+fewer ways of asking.
 
 Place words are matched by embedding the phrase and reading the nearest place names back
 from the vector index (`campus_nav/place_index.py`); when that index is unconfigured or
@@ -317,7 +324,7 @@ python -m pytest tests -q      # 109 tests + 24 subtests: no network, no keys, n
 | `campus_nav/copy.py` | every sentence the app says, as data, keyed by language — adding a language is a column, not a branch |
 | `campus_nav/format.py` | facility and timetable *shapes* with no prose: which rows, which day, what state |
 | `campus_nav/render.py` | what gets said about a reply: narration if there is any, else the catalogue, else the reply's own words. Also the only owner of facility and timetable sentences — those used to be a second, Chinese-only layer |
-| `campus_nav/replies.py` | the reply types (`Reply`, `RouteClarification`), so the behaviours that build them do not import each other |
+| `campus_nav/replies.py` | the reply types (`Reply`), so the behaviours that build them do not import each other |
 | `campus_nav/hours.py` | opening hours: quote the published table, list the candidates, or say there is no table — the one behaviour that consults the knowledge base instead of the router |
 | `tools/replay.py` | replay a fixed prompt list and diff the **facts** of the answers — the safety net for refactoring (timings are ignored) |
 | `web/` | the interface source: React 18 + TypeScript, styled with Tailwind, icons from Lucide, built by Vite |

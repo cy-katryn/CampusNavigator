@@ -25,8 +25,10 @@ class CatalogueTests(unittest.TestCase):
 
     def test_a_missing_language_falls_back_to_english(self) -> None:
         # A sentence in the wrong script beats no answer.
-        self.assertEqual(copy.t("speech.ask.origin", "en-US"),
-                         copy.COPY["speech.ask.origin"]["en-US"])
+        self.assertEqual(copy.t("speech.route", "xx-YY", origin="A", destination="B",
+                                metres=12),
+                         copy.COPY["speech.route"]["en-US"].format(
+                             origin="A", destination="B", metres=12))
 
     def test_an_unknown_key_is_a_bug_not_a_language_problem(self) -> None:
         with self.assertRaises(KeyError):

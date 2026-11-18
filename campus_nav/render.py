@@ -1,15 +1,15 @@
 """What gets said about a reply: the one place that decides, and phrases it.
 
-Everything this module needs may be absent -- no narration, no clarification, no route, no
-facilities -- so the arms are ordered from most specific to least, and the last arm truncates
-whatever the reply already says. No arm branches on language: the words come from
-`copy.COPY`, keyed by language, and only the *structure* lives here.
+Everything this module needs may be absent -- no narration, no route, no facilities -- so the
+arms are ordered from most specific to least, and the last arm truncates whatever the reply
+already says. No arm branches on language: the words come from `copy.COPY`, keyed by
+language, and only the *structure* lives here.
 """
 from __future__ import annotations
 
 from . import copy, format as fmt
 from .graph import CampusGraph
-from .local_names import localize_label, place_name, service_label
+from .local_names import place_name, service_label
 
 
 def route_speech(route, graph: CampusGraph, language: str) -> str:
@@ -29,27 +29,6 @@ def route_speech(route, graph: CampusGraph, language: str) -> str:
     stairs = any(segment.stairs for segment in route.segments)
     return head + copy.t("speech.route.stairs" if stairs else "speech.route.no_stairs",
                          language)
-
-
-def clarification_speech(prompt, graph: CampusGraph, language: str) -> str:
-    """Keep the confirmed endpoint and the user's disputed words audible."""
-    origin_missing = prompt.role == "origin"
-    context = ""
-    if prompt.known_place:
-        key = ("speech.ask.known_destination" if origin_missing
-               else "speech.ask.known_origin")
-        context = copy.t(key, language,
-                         place=localize_label(graph, prompt.known_place, language))
-    if prompt.candidates:
-        separator = copy.t("speech.list_separator", language)
-        names = separator.join(localize_label(graph, label, language)
-                               for label in prompt.candidates)
-        context += copy.t("speech.ask.ambiguous", language, query=prompt.query, names=names)
-    elif prompt.query:
-        context += copy.t("speech.ask.unknown", language, query=prompt.query)
-    question = copy.t("speech.ask.origin" if origin_missing else "speech.ask.destination",
-                      language)
-    return context + question
 
 
 def facility_speech(reply, graph: CampusGraph, language: str) -> str | None:
@@ -167,9 +146,6 @@ def speech(reply, graph: CampusGraph, language: str = "en-US") -> str:
     # every Chinese route answer English -- "由Block V去圖書館點行" was answered with
     # "Yes, you can walk from Block V ...". English prefers the narration, which reads better
     # than the receipt.
-    clarification = getattr(reply, "clarification", None)
-    if clarification and chinese:
-        return clarification_speech(clarification, graph, language)
     route = getattr(reply, "route", None)
     if route is not None and (chinese or not explicit):
         return route_speech(route, graph, language)
