@@ -187,8 +187,8 @@ def parse_with_llm(text: str, graph: CampusGraph, client: DeepSeekClient,
     # thing the model is better at than this codebase. Sending a single message made every
     # referring expression ("the nearest one", "make it go via Core P", "and the toilet?")
     # unreadable, and the dialogue layer grew a rule for each phrasing to compensate. The
-    # last few turns are sent instead; the guard in _validated() still decides whether the
-    # model may act on them (see _DEICTIC).
+    # whole conversation is sent instead; the guard in _validated() still decides whether
+    # the model may act on it (see _DEICTIC).
     prompt = SYSTEM_PROMPT.format(intents=", ".join(f'"{i}"' for i in INTENTS))
     messages = [{"role": "system", "content": prompt}]
     messages.extend(context or [])

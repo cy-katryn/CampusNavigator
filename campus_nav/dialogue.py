@@ -93,12 +93,6 @@ def place_legs(graph: CampusGraph, route: RouteResult) -> list[tuple[str, str, f
     return legs
 
 
-# How many messages of history the parser sees: two exchanges is enough to resolve "the
-# nearest one" or "make it go via X", and short enough that an old turn cannot be mistaken
-# for the current question.
-HISTORY_TURNS = 6
-
-
 def fmt_route(graph: CampusGraph, route: RouteResult) -> str:
     """The route as a person reads it: legs between PLACES."""
     if not route.reachable:
@@ -192,7 +186,8 @@ class Dialogue:
         self._llm_ok_for_turn = True
         # The agent writes the prose itself; narration would ask the model again.
         self.narrate = True
-        # Recent exchanges, for the parser only: the engine reads its own state, not this.
+        # The whole conversation, for the parser only: the engine reads its own state, not
+        # this.
         self.history: list[dict] = []
         # The language the current question is answered in, set per turn from the request.
         # Not part of the journey state: it belongs to the message being answered.
@@ -314,10 +309,10 @@ class Dialogue:
     def _context_digest(self) -> dict | None:
         """The journey in one line, from the engine's state rather than from the prose.
 
-        Six messages of history resolve "the nearest one"; they cannot carry a journey
-        through a long aside. The state can, and it is a fact rather than a transcript, so it
-        is handed over as a separate system message: the model may repeat these endpoints,
-        and it may never invent one.
+        The history carries "the nearest one" and a long aside; the state carries the
+        journey itself, in a line the transcript cannot garble. It is a fact rather than
+        prose, so it is handed over as a separate system message: the model may repeat these
+        endpoints, and it may never invent one.
         """
         state = self.state
         if not (state.origin or state.destination or state.stops):
@@ -339,7 +334,6 @@ class Dialogue:
         said = (reply.spoken or reply.text or "").strip().replace("\n", " ")
         self.history.append({"role": "user", "content": text.strip()[:400]})
         self.history.append({"role": "assistant", "content": said[:400]})
-        del self.history[:-HISTORY_TURNS]
 
     @staticmethod
     def _language(text: str, language: str | None) -> str:

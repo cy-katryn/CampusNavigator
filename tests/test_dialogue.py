@@ -14,7 +14,7 @@ from campus_nav.config import Settings, graph_path
 from campus_nav.format import DAYS
 from campus_nav.kb import HKT
 from campus_nav import dialogue as dialogue_module
-from campus_nav.dialogue import HISTORY_TURNS, Dialogue, place_legs, walk_minutes
+from campus_nav.dialogue import Dialogue, place_legs, walk_minutes
 from campus_nav.format import FacilityResult
 from campus_nav.nlu import Slots
 from campus_nav.graph import CampusGraph
@@ -322,11 +322,11 @@ class MemoryLifecycleTests(unittest.TestCase):
     def dialogue(self) -> Dialogue:
         return Dialogue(self.graph, client=None, narrator=None, places=self.places)
 
-    def test_the_history_is_trimmed_to_its_cap(self) -> None:
+    def test_the_history_keeps_the_whole_conversation(self) -> None:
         talk = self.dialogue()
         for _ in range(6):
             talk.handle("how do I get from Block V to the library?")
-        self.assertEqual(len(talk.history), HISTORY_TURNS)
+        self.assertEqual(len(talk.history), 12, "six exchanges, no trimming")
         self.assertEqual(len(talk.history) % 2, 0, "whole exchanges, not half of one")
 
     def test_reset_forgets_the_history_as_well_as_the_state(self) -> None:
@@ -339,7 +339,7 @@ class MemoryLifecycleTests(unittest.TestCase):
         self.assertIsNone(talk.state.origin)
 
     def test_the_journey_survives_as_a_state_line_not_a_transcript(self) -> None:
-        # Six messages cannot carry a journey through a long aside; the state can, and it is
+        # The history cannot carry a journey through a long aside; the state can, and it is
         # a fact rather than prose, so it is handed over separately.
         talk = self.dialogue()
         talk.handle("how do I get from Block V to the library?")

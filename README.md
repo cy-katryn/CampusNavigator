@@ -87,15 +87,15 @@ Three separate stores, each with a different job and a different lifetime:
 | store | holds | lives in | cleared by |
 |---|---|---|---|
 | `SessionState` | origin, destination, stops, closures, stair preference, last list | the server, one per browser cookie (32 at most; the oldest browser is dropped first) | "Clear", "reset", or the browser evicting |
-| parser history | the last 6 messages (3 exchanges, 400 chars each) | the same server-side object, trimmed on every turn | the same |
+| parser history | the whole conversation (400 chars per message) | the same server-side object, append-only | the same |
 | transcript | the visible conversation | that browser's `localStorage`, versioned | the Clear button, or the error panel |
 
-The parser window is deliberately short, and it is *not* the memory: the journey travels as
+The parser sees the whole conversation, and it is *not* the memory: the journey travels as
 a one-line system message built from `SessionState` on every turn ("CURRENT JOURNEY … origin
 Block V; destination the library; stops in order: Core P"). That is a fact rather than prose,
-so it survives a long aside without the conversation window having to grow, and the model may
-repeat those endpoints but never invent one. Resetting clears the state *and* the history —
-clearing only the state once left the parser able to read a conversation the user had erased.
+so it survives however long the conversation grows, and the model may repeat those endpoints
+but never invent one. Resetting clears the state *and* the history — clearing only the state
+once left the parser able to read a conversation the user had erased.
 
 Three rules make this safe rather than optimistic. They are code, not prompt text, because
 a prompt can be ignored and these cannot.
