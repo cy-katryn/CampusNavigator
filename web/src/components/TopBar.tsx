@@ -27,7 +27,7 @@ function pillText(
     ok: false,
     title:
       (status ? status.mode : 'connecting…') +
-      '\nUse the gear to add a DeepSeek key; every feature still works without one',
+      '\nUse the gear to add a model key (any OpenAI-compatible endpoint).',
   };
 }
 

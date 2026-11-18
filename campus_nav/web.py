@@ -359,6 +359,36 @@ def write_env(updates: dict[str, str], path: Path = ENV_PATH) -> None:
     path.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
 
 
+def settings_updates(api_key: str | None = None, model: str | None = None,
+                     base_url: str | None = None,
+                     embeddings_api_key: str | None = None,
+                     pinecone_api_key: str | None = None) -> tuple[dict, dict]:
+    """What to write to .env, and what to change in the running settings.
+
+    Pure, so the mapping can be tested without writing a file. Absent means "leave it
+    alone"; an empty base URL means "back to the default endpoint".
+    """
+    updates: dict[str, str] = {}
+    changes: dict[str, str] = {}
+    if api_key is not None:
+        updates["LLM_API_KEY"] = api_key.strip()
+        changes["api_key"] = api_key.strip()
+    if model is not None and model.strip():
+        updates["LLM_MODEL"] = model.strip()
+        changes["model"] = model.strip()
+    if base_url is not None:
+        address = base_url.strip().rstrip("/")
+        updates["LLM_BASE_URL"] = address
+        changes["base_url"] = address or "https://api.deepseek.com/v1"
+    if embeddings_api_key is not None:
+        updates["EMBEDDINGS_API_KEY"] = embeddings_api_key.strip()
+        changes["embeddings_api_key"] = embeddings_api_key.strip()
+    if pinecone_api_key is not None:
+        updates["PINECONE_API_KEY"] = pinecone_api_key.strip()
+        changes["pinecone_api_key"] = pinecone_api_key.strip()
+    return updates, changes
+
+
 # ----------------------------------------------------------------------- app state
 class App:
     def __init__(self) -> None:
@@ -392,17 +422,17 @@ class App:
         return dialogue
 
     def apply_settings(self, api_key: str | None = None, model: str | None = None,
-                       *, embeddings_api_key: str | None = None,
+                       *, base_url: str | None = None,
+                       embeddings_api_key: str | None = None,
                        pinecone_api_key: str | None = None) -> dict:
-        """Persist new settings and use them immediately, without a restart."""
-        updates: dict[str, str] = {}
-        changes: dict[str, str] = {}
-        if api_key is not None:
-            updates["DEEPSEEK_API_KEY"] = api_key.strip()
-            changes["api_key"] = api_key.strip()
-        if model is not None and model.strip():
-            updates["DEEPSEEK_MODEL"] = model.strip()
-            changes["model"] = model.strip()
+        """Persist new settings and use them immediately, without a restart.
+
+        The client speaks the OpenAI chat-completions protocol, so the endpoint is a setting,
+        not a hard-coded vendor: any compatible base URL works, and DeepSeek is only the
+        default. The LLM_* names are what config.get_settings() reads first.
+        """
+        updates, changes = settings_updates(api_key, model, base_url,
+                                           embeddings_api_key, pinecone_api_key)
         if embeddings_api_key is not None:
             updates["EMBEDDINGS_API_KEY"] = embeddings_api_key.strip()
             changes["embeddings_api_key"] = embeddings_api_key.strip()
@@ -433,6 +463,7 @@ class App:
         return {
             "mode": self.settings.mode_label,
             "model": self.settings.model if self.settings.llm_available else "",
+            "base_url": self.settings.base_url,
             "api_key_present": bool(self.settings.api_key),
             "embeddings_key_present": bool(self.settings.embeddings_api_key),
             "pinecone_key_present": bool(self.settings.pinecone_api_key),
@@ -598,6 +629,7 @@ class Handler(BaseHTTPRequestHandler):
             limits = {
                 "api_key": 200,
                 "model": 120,
+                "base_url": 200,
                 "embeddings_api_key": 200,
                 "pinecone_api_key": 200,
             }
@@ -617,6 +649,7 @@ class Handler(BaseHTTPRequestHandler):
                 status = self.app.apply_settings(
                     values["api_key"],
                     values["model"],
+                    base_url=values["base_url"],
                     embeddings_api_key=values["embeddings_api_key"],
                     pinecone_api_key=values["pinecone_api_key"],
                 )

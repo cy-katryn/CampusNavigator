@@ -29,6 +29,7 @@ export async function sendChat(text: string, lang: string): Promise<ChatPayload>
 interface SettingsPayload {
   apiKey?: string | null;
   model?: string | null;
+  baseUrl?: string | null;
   embeddingsApiKey?: string | null;
   pineconeApiKey?: string | null;
 }
@@ -42,6 +43,7 @@ export async function saveSettings(
     body: JSON.stringify({
       api_key: payload.apiKey,
       model: payload.model,
+      base_url: payload.baseUrl,
       embeddings_api_key: payload.embeddingsApiKey,
       pinecone_api_key: payload.pineconeApiKey,
     }),

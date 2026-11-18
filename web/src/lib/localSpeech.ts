@@ -48,8 +48,6 @@ export interface LocalInputEvents {
 export class LocalSpeechInput {
   private chunks: Float32Array[] = [];
   private sampleCount = 0;
-  private lastSpeech = 0;
-  private hasSignal = false;
   private phase: 'opening' | 'recording' | 'transcribing' | 'ended' = 'opening';
   private request = new AbortController();
   private rate = 0;
@@ -102,17 +100,11 @@ export class LocalSpeechInput {
     const chunk = samples.subarray(0, this.rate * 30 - this.sampleCount);
     this.chunks.push(chunk);
     this.sampleCount += chunk.length;
-    let power = 0;
-    for (const value of chunk) power += value * value;
-    if (power > chunk.length * 0.0005 ** 2) this.hasSignal = true;
-    if (power > chunk.length * 0.008 ** 2) this.lastSpeech = this.sampleCount;
-    const silence = this.sampleCount - this.lastSpeech;
-    if (!this.hasSignal && this.sampleCount >= this.rate * 8) {
-      this.fail('no-speech');
-      return;
-    }
-    if (this.sampleCount === this.rate * 30 ||
-        (this.lastSpeech && silence >= this.rate * 1.5)) this.stop();
+    // The recording ends when the user selects Finish -- not when the room goes quiet, and
+    // not after a pause. The only automatic stop left is the length the server accepts
+    // (30 s, see speech.MAX_SECONDS); a silent take is reported by the transcriber instead
+    // of being cut short here.
+    if (this.sampleCount === this.rate * 30) this.stop();
   }
 
   private releaseMic() {
@@ -150,10 +142,6 @@ export class LocalSpeechInput {
     if (this.phase !== 'recording') return;
     this.phase = 'transcribing';
     this.releaseMic();
-    if (!this.hasSignal) {
-      this.fail('no-speech');
-      return;
-    }
     this.events.transcribing();
     try {
       const body = encodeSpeechWav(this.chunks, this.sampleCount, this.rate);

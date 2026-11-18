@@ -147,6 +147,8 @@ export interface KnowledgeStatus {
 export interface Status {
   mode: string;
   model: string;
+  /** The chat-completions endpoint in use; any OpenAI-compatible URL is allowed. */
+  base_url?: string;
   api_key_present: boolean;
   /** Whether a key for the embeddings endpoint is stored. */
   embeddings_key_present?: boolean;

@@ -65,6 +65,7 @@ function KeyRow(props: {
 export function SettingsDialog({ open, status, onClose, onSaved }: SettingsDialogProps) {
   const [key, setKey] = useState('');
   const [model, setModel] = useState('');
+  const [baseUrl, setBaseUrl] = useState('');
   const [embeddingsKey, setEmbeddingsKey] = useState('');
   const [pineconeKey, setPineconeKey] = useState('');
   const [message, setMessage] = useState('');
@@ -95,10 +96,12 @@ export function SettingsDialog({ open, status, onClose, onSaved }: SettingsDialo
     const payload = {
       apiKey: key.trim() || null,
       model: model.trim() || null,
+      baseUrl: baseUrl.trim() || null,
       embeddingsApiKey: embeddingsKey.trim() || null,
       pineconeApiKey: pineconeKey.trim() || null,
     };
-    if (!payload.apiKey && !payload.model && !payload.embeddingsApiKey && !payload.pineconeApiKey) {
+    if (!payload.apiKey && !payload.model && !payload.baseUrl
+        && !payload.embeddingsApiKey && !payload.pineconeApiKey) {
       setMessage('Nothing to save — every field is empty.');
       setTone('err');
       return;
@@ -154,10 +157,10 @@ export function SettingsDialog({ open, status, onClose, onSaved }: SettingsDialo
         </p>
 
         <KeyRow
-          label="DeepSeek API key — understanding and wording"
+          label="Model API key — understanding and wording"
           link={LINKS.llm}
           linkLabel="get a key"
-          hint="Without it the deterministic grammar parses, so fewer phrasings are understood."
+          hint="Any OpenAI-compatible endpoint works; DeepSeek is only the default. Without a key the assistant cannot read questions."
           placeholder="sk-… (leave blank to keep the current one)"
           value={key}
           onChange={setKey}
@@ -171,11 +174,31 @@ export function SettingsDialog({ open, status, onClose, onSaved }: SettingsDialo
             type="text"
             autoComplete="off"
             spellCheck={false}
-            placeholder="deepseek-chat"
+            placeholder="deepseek-chat · gpt-4o-mini · qwen-plus"
             value={model}
             onChange={(event) => setModel(event.target.value)}
             className={FIELD_INPUT}
           />
+          <span className="mt-1 block text-[11px] leading-snug text-muted">
+            Any model that supports tool calling.
+          </span>
+        </label>
+
+        <label className="mb-3 block">
+          <span className="mb-1 block text-[11.5px] text-muted">Endpoint (base URL)</span>
+          <input
+            type="text"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder={status?.base_url || 'https://api.deepseek.com/v1'}
+            value={baseUrl}
+            onChange={(event) => setBaseUrl(event.target.value)}
+            className={FIELD_INPUT}
+          />
+          <span className="mt-1 block text-[11px] leading-snug text-muted">
+            Leave blank for DeepSeek. Any OpenAI-compatible URL: api.openai.com/v1, a local
+            server, a proxy.
+          </span>
         </label>
 
         <KeyRow

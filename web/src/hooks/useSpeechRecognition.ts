@@ -97,7 +97,8 @@ export function useSpeechRecognition(onTranscript: (text: string, final: boolean
       const browser = new Constructor();
       rec = browser;
       browser.lang = lang;
-      browser.continuous = false;
+      // Keep listening through pauses: the recording ends when the user selects Finish.
+      browser.continuous = true;
       browser.interimResults = true;
       browser.onstart = events.listening;
       browser.onend = events.end;

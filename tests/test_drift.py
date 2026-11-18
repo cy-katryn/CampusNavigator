@@ -83,6 +83,30 @@ class TableAgreementTests(unittest.TestCase):
                                 f"{capability!r} has no Chinese label")
 
 
+class SettingsMappingTests(unittest.TestCase):
+    """The settings dialog may point the client at any OpenAI-compatible endpoint."""
+
+    def test_any_endpoint_is_stored_under_the_llm_names(self) -> None:
+        from campus_nav.web import settings_updates
+        updates, changes = settings_updates("key", "gpt-4o-mini", "https://api.openai.com/v1/")
+        self.assertEqual(updates["LLM_API_KEY"], "key")
+        self.assertEqual(updates["LLM_MODEL"], "gpt-4o-mini")
+        self.assertEqual(updates["LLM_BASE_URL"], "https://api.openai.com/v1",
+                         "the trailing slash is stripped so {base}/chat/completions is well formed")
+        self.assertEqual(changes["base_url"], "https://api.openai.com/v1")
+
+    def test_an_empty_endpoint_falls_back_to_the_default(self) -> None:
+        from campus_nav.web import settings_updates
+        _updates, changes = settings_updates(base_url="")
+        self.assertEqual(changes["base_url"], "https://api.deepseek.com/v1")
+
+    def test_absent_fields_are_left_alone(self) -> None:
+        from campus_nav.web import settings_updates
+        updates, changes = settings_updates(model="qwen-plus")
+        self.assertEqual(set(updates), {"LLM_MODEL"})
+        self.assertEqual(set(changes), {"model"})
+
+
 if __name__ == "__main__":
     unittest.main()
 
