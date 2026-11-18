@@ -1,20 +1,12 @@
-"""Turn a sentence into slots.
+"""The offline front-end: deterministic rules that turn a sentence into slots.
 
-Two parsers share one output type, and `parse` runs them in this order:
+This is the parser the app uses when no model answers -- no key, no network, a timeout, or
+the assistant returning nothing. `parse_with_grammar` returns a `Slots`, and `Dialogue`
+executes it exactly as it executes the model's tool calls.
 
-  * `parse_with_llm`     -- asks the model for strict JSON, then validates it. This
-                           is the primary parser: it reads any phrasing, not only
-                           the sentence shapes somebody enumerated. Every failure
-                           -- no key, timeout, bad JSON, unknown intent, an
-                           endpoint the resolver cannot name -- returns None and
-                           the grammar answers instead.
-  * `parse_with_grammar` -- deterministic regex rules. The fallback: the mode the
-                           app runs in with no key and no network, and the safety
-                           net when a model turn is unusable.
-
-The LLM never decides a route and never invents a place: it reports what the user
-said, and `_validated()` accepts a place phrase only if the resolver recognises it.
-That boundary is enforced in code, not requested in a prompt.
+The same module holds the shared vocabulary the engine owns: the amenity words, the Chinese
+service table, the day words, the asking-frame stripping, and the `Slots` contract itself.
+There is no place catalogue here and none in any prompt: the resolver names places.
 """
 from __future__ import annotations
 
@@ -31,72 +23,6 @@ from .places import amenity_in_text
 # The resolver every grammar rule consults: PlaceIndex.resolve(text) -> list[Node].
 # It is passed in rather than imported so the rules stay testable without a network.
 PlaceResolver = Any
-
-INTENTS = (
-    "route",          # find a way from A to B
-    "distance",       # how far is A from B
-    "close",          # this link or place is closed
-
-    "facility_query", # where is the nearest AED / toilet / water station / canteen
-    "hours_query",    # is the canteen open now / what are the clinic's hours
-    "reset",
-    "help",
-    "out_of_scope",
-)
-
-SYSTEM_PROMPT = """You convert a user's campus-navigation message into JSON slots.
-
-You do not know which places or facilities exist on this campus, and you are not asked to
-guess: the app knows its own map and matches what the user said against it. Your job is to
-report the user's words, not to classify or translate them.
-
-Return ONLY a JSON object with exactly these keys:
-{{
-  "intent": one of {intents},
-  "need": the words the user used for the thing they want to find, copied verbatim, or null,
-  "origin": the place the user starts at, in their own words, or null,
-  "destination": the place they want to reach, in their own words, or null,
-  "vias": every place to walk through, in the order the user said them, as a list of
-          their own words (empty or null when there are none),
-  "closed": the place or link the user says is closed, as free text, or null,
-  "along_the_way": true when what they want is about the walk already in progress
-          ("...on the way", "stop for X en route"), otherwise false,
-  "clear_stops": true when they want the stops dropped ("no stops", "the direct route"),
-  "language": "en" or "zh"
-}}
-
-Rules:
-- Copy the user's words into the slot: "destination": "the 7-Eleven", "origin": "Block V".
-  Do not translate them, do not shorten them, do not guess an id or a coordinate, and do
-  not replace them with a category of your own -- "a swim" stays "a swim", never "sports
-  facilities". Never answer null for a place the user actually named: that silently turns
-  their question into "where do you want to go?".
-- Those examples show the shape of an answer, not its content. Use only the words this
-  user wrote: if they did not say where they are starting, "origin" is null, and null is
-  the right answer for a place they did not mention.
-- intent "facility_query" is any "find me / where can I / I want ..." question that is not
-  a route and not a timetable. Put the thing they want in "need", copied verbatim ("a
-  swim", "somewhere to eat lunch", "the nearest AED", "to print something"), and leave
-  origin and destination null. Whether that is an amenity, a building or an activity is
-  decided by the app, which can see the whole campus; you cannot see it, so do not decide.
-- intent "hours_query" for opening times: "is the canteen open now", "opening hours of the
-  clinic", "what time does the bookshop close" -> put the place or service in "need".
-- intent "route" for a journey, "distance" for how far, "close" when the user reports
-  something closed, "reset"/"help" for those two commands, "out_of_scope" only when the
-  message is not about this campus at all.
-- Never copy a need or an activity into "destination": a need in a place slot becomes a
-  route to somewhere nobody asked for.
-- The conversation so far is included. Resolve references from it: "the nearest one", "that
-  one", "the first", "there" mean the place your last answer named; "make it go via X",
-  "what about going through X", "on the way" describe the journey already in progress, so
-  repeat its origin and destination and set "vias"; "and the toilet?" carries the same kind
-  of question. Copy the *name* the conversation used, and describe only the user's LAST
-  message. What you may not do is invent a place that appears nowhere in the conversation.
-- Stops are a list and keep their order: "from A through C, then passing Block D, to B" ->
-  origin A, vias ["C", "Block D"], destination B. "I must pass through X, Y and Z" is three
-  stops: vias ["X", "Y", "Z"].
-- Output JSON only, no prose, no code fences."""
-
 
 @dataclass
 class Slots:
@@ -121,9 +47,6 @@ class Slots:
     when: str = ""
     language: str = "en"
     source: str = "grammar"
-    # Why the grammar answered when a model was configured: "model abstained", "model
-    # failed (timeout, quota or bad JSON)", "model slots rejected", "no model configured".
-    parse_note: str = ""
     avoid_stairs: bool | None = None  # None keeps the current route preference
     clear_stops: bool = False         # "no stops" / "the direct route"
     along_the_way: bool = False       # the wish is about the walk in progress, not a new one
@@ -158,93 +81,6 @@ def facility_words(graph: CampusGraph) -> list[str]:
     }
     amenities = labels - _DIRECTORY_LABELS
     return sorted(amenities or labels)
-
-def _as_list(value: Any) -> list[str]:
-    """A slot that may be a list, one string, or null, read as a list of strings.
-
-    A prompt is not a type system: the model writes "vias": ["Core P", "Block X"] most of the
-    time and "vias": "Core P" the rest, and both mean the same thing.
-    """
-    if value is None:
-        return []
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, (list, tuple)):
-        return [item for item in value if isinstance(item, str)]
-    return []
-
-
-def parse_with_llm(text: str, graph: CampusGraph, client: DeepSeekClient,
-                   context: list[dict] | None = None) -> Slots | None:
-    # No place catalogue: 98 lines and ~1,400 tokens per message that the model does not
-    # need, because the resolver names places from the graph. The short facility list
-    # stays -- that is the vocabulary "item" has to be chosen from.
-    # No map vocabulary at all: not the place catalogue (which let the model invent names)
-    # and not the amenity list (which let it turn "a swim" into "water station"). Both are
-    # things the engine can see and the model cannot, so both are the engine's job.
-    #
-    # The *conversation*, on the other hand, is language, and reading language is the one
-    # thing the model is better at than this codebase. Sending a single message made every
-    # referring expression ("the nearest one", "make it go via Core P", "and the toilet?")
-    # unreadable, and the dialogue layer grew a rule for each phrasing to compensate. The
-    # whole conversation is sent instead; the guard in _validated() still decides whether
-    # the model may act on it (see _DEICTIC).
-    prompt = SYSTEM_PROMPT.format(intents=", ".join(f'"{i}"' for i in INTENTS))
-    messages = [{"role": "system", "content": prompt}]
-    messages.extend(context or [])
-    messages.append({"role": "user", "content": text})
-    result = client.chat(messages, max_tokens=220, retries=2)
-    payload = result.json()
-    if not payload:
-        return None
-
-    intent = str(payload.get("intent") or "").strip()
-    if intent not in INTENTS:
-        return None
-
-    def as_id(value) -> str:
-        """Turn what the model reported into the words this app resolves places by.
-
-        A real node id becomes that node's *name*, because the rest of the pipeline
-        resolves place names through the index -- and an id is not a name. Embedding
-        "POI_5bcd371552_67" lands between unrelated neighbours (it scored 0.59 for Core B
-        and 0.55 for Block Z, while the id belonged to Pao Yue-Kong Library), so the
-        model's correct answer arrived as "which Core B did you mean?".
-
-        Free text is kept as written: it is resolved by name later, and an id the model
-        invented matches no node and stays text. This is the boundary the module
-        docstring describes -- the model may report a place, it may not create one.
-        """
-        if not isinstance(value, str) or not value.strip():
-            return ""
-        candidate = value.strip()
-        node = graph.nodes.get(candidate)
-        if node is not None and node.kind != "waypoint":
-            return node.name
-        return candidate
-
-    closed = payload.get("closed")
-    closed_text = closed.strip() if isinstance(closed, str) else ""
-
-    return Slots(
-        intent=intent,
-        origin_text=as_id(payload.get("origin")),
-        destination_text=as_id(payload.get("destination")),
-        closed_text=closed_text,
-        # "need" is copied, "item" is not: any label the model volunteers is ignored, because
-        # choosing from a vocabulary it cannot see is the model's one job it cannot do.
-        need=str(payload.get("need") or "").strip(),
-        vias=[phrase for phrase in (as_id(value) for value in
-                                    _as_list(payload.get("vias", payload.get("via"))))
-              if phrase],
-        along_the_way=bool(payload.get("along_the_way")),
-        clear_stops=bool(payload.get("clear_stops")),
-        subject=topic_phrase(text) if intent in ("hours_query", "facility_query") else "",
-        when=day_phrase(text, topic_phrase(text)),
-        language=str(payload.get("language") or "en"),
-        source="llm",
-    )
-
 
 # Only an explicit preference changes the route. Merely asking whether a route
 # contains stairs must not remove those edges from the search.
@@ -812,14 +648,10 @@ def parse_with_grammar(text: str, places: PlaceResolver) -> Slots:
 
     closed_text = lowered.strip() if _CLOSED_SAID.search(lowered) else ""
 
+    # The engine owns the amenity vocabulary (places.FACILITY_WORDS): "lunch" is catering,
+    # "sick" is a clinic, "cash" is a bank. The grammar used to keep its own short list of
+    # these words, so a need outside it fell straight through. One table, read everywhere.
     item = amenity_in_text(lowered)
-    if not item:
-        # The engine owns the amenity vocabulary (places.FACILITY_WORDS): "lunch" is
-        # catering, "sick" is a clinic, "cash" is a bank. The grammar used to keep its own
-        # short list of these words, so a need outside it fell straight through -- "I want to
-        # grab lunch, where can I head to?" was answered with "I can find walking routes,
-        # point you to facilities...". One table, read by both parsers.
-        item = amenity_in_text(lowered)
     wants_hours = bool(_HOURS.search(lowered))
     # "the link to Core D is closed" and "the library is closed today" are reports
     # about the map; "is the canteen closed on Sunday?" and "what time does the
@@ -879,155 +711,3 @@ def parse_with_grammar(text: str, places: PlaceResolver) -> Slots:
     )
 
 
-# Referring expressions: a message that contains one is *about* something the conversation
-# already said, so a slot may be filled from the recent turns. A message without one must be
-# self-contained -- which is what keeps "where is the library?" from inheriting the origin of
-# a route two turns ago. This is a permission gate, not a resolver: the model still has to
-# read the sentence and the engine still owns every place it names.
-_DEICTIC = re.compile(
-    r"\b(?:nearest|closest|that|this|these|those|there|here|it|its|them|they|the\s+one|"
-    r"first|second|third|last|other|another|same|via|through|way|again|instead|"
-    r"the\s+route|the\s+path|directions)\b|"
-    r"最近|那裡|那里|這裡|这里|它|嗰個|那個|呢個|第[一二三]|同一|附近|沿途|路上|經過|经过|改為|改为",
-    re.I,
-)
-
-
-def _named_by_user(phrase: str, text: str, context: str = "") -> bool:
-    """Can the user's own message account for this place phrase?
-
-    A prompt shows the *shape* of an answer with a real example ("origin": "Block V"), and
-    a model that is unsure hands the example back. Observed: "where is the library?"
-    answered as a route from Block V, because "Block V" is in the prompt and the library is
-    not. The slot resolved to a real place, so every check downstream believed it.
-
-    So a name has to be traceable to the words the user wrote: a word in common, or a word
-    close enough to be the same word misspelt ("libarry" -> "library"). The tolerance is
-    for spelling, never for substitution -- "Block V" shares nothing with "how do I get to
-    the library?". Chinese carries its own test, because it is written without spaces.
-    """
-    said = lexical.normalise(text) + lexical.normalise(context)
-    for word in lexical.normalise(phrase):
-        if word in said:
-            return True
-        if _HAS_CJK.search(word) and (word in text or word in context):
-            return True
-        if len(word) >= 4 and any(
-            len(other) >= 4 and difflib.SequenceMatcher(None, word, other).ratio() >= 0.8
-            for other in said
-        ):
-            return True
-    return False
-
-
-def _validated(slots: Slots, places: PlaceResolver, text: str = "",
-               context: str = "") -> Slots | None:
-    """Accept a model parse only if the map can back it up.
-
-    Three cheap checks. The intent must be one this dialogue layer implements
-    (parse_with_llm already filters that, so this is belt and braces). Every place phrase
-    the model reports must be one the resolver recognises: the model may report what the
-    user said, it may never create a place. And every phrase must be traceable to the
-    user's own words (see _named_by_user), because resolving is not the same as being
-    asked about -- the prompt's own example resolves. An endpoint that fails either test
-    is dropped, and a route left with no endpoint is refused outright so the grammar gets
-    its turn instead.
-    """
-    if slots.intent not in INTENTS:
-        return None
-    # A model may decline to understand something; it may not decide that a campus
-    # question is out of scope, and it may not decide that a question is about the
-    # conversation rather than the campus. Observed: "re-open it" -- one of this app's own
-    # commands, recognised by the grammar's REOPEN rule -- came back as out_of_scope and the
-    # recovery path never ran; "what can I find here" came back as "help" and the catalogue
-    # listing never ran. These two intents are meta: the grammar holds fixed, inspectable
-    # rules for both, so the grammar is what gets to say them.
-    if slots.intent in ("out_of_scope", "help"):
-        return None
-    # The model read the intent but not the place ("the canteen is closed" -> close, no
-    # closed text). The grammar hands _close the whole sentence and lets the resolver find
-    # the place inside it, so do the same instead of asking the user to repeat themselves.
-    if slots.intent == "close" and not slots.closed_text and _CLOSED_SAID.search(text):
-        slots.closed_text = text.strip()
-    # A closure blocks every route through that place, so it is the most expensive thing a
-    # model can make up. Keeping one takes two things: the user has to have said something
-    # is closed (naming a place is not saying it is closed -- "how do I get from Block V to
-    # the library?" names both ends and reports nothing closed), and the place has to be
-    # one of the places they named.
-    # A slot may be filled from the recent conversation only when this message refers to it
-    # ("the nearest one", "make it go via Core P"). Everything else must be in this message.
-    window = context if (context and _DEICTIC.search(text)) else ""
-
-    if slots.closed_text and not (
-        _CLOSED_SAID.search(text) and _named_by_user(slots.closed_text, text, window)
-    ):
-        slots.closed_text = ""
-    # A stop is optional: an unnameable or unmentioned one is dropped so the plain route
-    # still runs. Each one is checked on its own, so a request with three stops keeps the
-    # two that name places.
-    slots.vias = [phrase for phrase in (slots.vias or [])
-                  if _named_by_user(phrase, text, window) and places.resolve(phrase)]
-    for name in ("origin_text", "destination_text"):
-        phrase = getattr(slots, name)
-        if not phrase:
-            continue
-        if not _named_by_user(phrase, text, window):
-            setattr(slots, name, "")    # the model's own idea, not the user's words
-            if slots.intent in ("route", "distance"):
-                return None
-        # A phrase the user did say that the map cannot find is *kept*: the dialogue then
-        # answers it with "I do not know X" and the closest names, instead of quietly
-        # turning their sentence into a different question about a place they never named.
-        # Dropping it is how "Core Y" became a question about Core A.
-    # A route needs somewhere to go -- unless it only adds a stop, which re-plans the
-    # journey already in progress ("make sure I pass through Core P on the way"). The
-    # dialogue holds those endpoints; refusing here sent the sentence back to the grammar,
-    # which read it as a fresh pair of places.
-    if slots.intent == "route" and not (
-        slots.origin_text or slots.destination_text or slots.vias
-    ):
-        return None
-    return slots
-
-
-def parse(text: str, graph: CampusGraph, client: DeepSeekClient | None,
-          places: PlaceResolver, context: list[dict] | None = None) -> Slots:
-    """Ask the model first; fall back to the deterministic grammar.
-
-    The model is the parser whenever it is available, because it reads any phrasing and
-    not only the sentence shapes somebody enumerated. Its answer is validated by
-    _validated() before anything trusts it, and every failure path -- no key, timeout,
-    bad JSON, unknown intent, unnameable endpoint -- ends in the same place: the
-    grammar answers. A bad model turn therefore costs coverage, never correctness.
-    """
-    # Which layer answered, and why. "understood by grammar" alone hides four very
-    # different situations -- no key, a dead API, the model declining, the model being
-    # wrong -- and they need different fixes. The transcript shows this note.
-    note = "no model configured"
-    if client is not None and client.settings.llm_available:
-        route_text, avoid_stairs = stair_request(text)
-        candidate = parse_with_llm(route_text or text, graph, client, context)
-        if candidate is None:
-            note = "model failed (timeout, quota or bad JSON)"
-        elif candidate.intent in ("out_of_scope", "help"):
-            note = "model abstained"
-        else:
-            window = " ".join(turn.get("content", "") for turn in (context or []))
-            accepted = _validated(candidate, places, route_text or text, window)
-            if accepted is not None:
-                if not accepted.item and _HAS_CJK.search(text):
-                    # The model answered in Chinese ("飯堂幾點開門" -> hours_query, need
-                    # 飯堂), and the engine's amenity table is English wording: the grammar's
-                    # Chinese service table is the same vocabulary in the other script, so it
-                    # supplies the item the model could not.
-                    chinese = _chinese_facility(text, places)
-                    if chinese is not None and chinese.item:
-                        accepted.item = chinese.item
-                accepted.avoid_stairs = (
-                    avoid_stairs if avoid_stairs is not None else accepted.avoid_stairs
-                )
-                return accepted
-            note = "model slots rejected"
-    slots = parse_with_grammar(text, places)
-    slots.parse_note = note
-    return slots

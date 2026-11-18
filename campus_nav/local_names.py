@@ -21,6 +21,7 @@ from __future__ import annotations
 import re
 
 from .graph import CampusGraph
+from .places import facility_capability
 from .places import label_key as _key
 
 
@@ -40,19 +41,23 @@ _LABELS = {
 # They describe the dataset -- a toilet and an accessible toilet are different promises --
 # so they live with the other label translations rather than inside a renderer.
 SERVICE_LABELS: dict[str, tuple[str, str]] = {
+    # The 14 services the map actually publishes on its facility records.
     "water station": ("饮水机", "飲水機"), "toilet": ("洗手间", "洗手間"),
     "accessible toilet": ("无障碍洗手间", "暢通易達洗手間"), "aed": ("AED", "AED"),
-    "canteen": ("食堂", "飯堂"), "cafe": ("咖啡厅", "咖啡店"), "clinic": ("诊所", "診所"),
+    "catering outlets": ("餐饮设施", "餐飲設施"), "clinics": ("诊所", "診所"),
     "bank": ("银行", "銀行"), "bookstore": ("书店", "書店"), "postbox": ("邮筒", "郵筒"),
     "lactation room": ("哺乳室", "集乳室"), "prayer room": ("祈祷室", "祈禱室"),
-    "bus stop": ("巴士站", "巴士站"), "lift": ("电梯", "升降機"),
-    "faculty / department": ("院系", "學院及學系"), "office": ("办公室", "辦公室"),
-    "lecture theatre": ("演讲厅", "演講廳"), "shop": ("商店", "商店"),
-    "research office": ("研究办公室", "研究辦公室"), "club room": ("活动室", "活動室"),
-    "theatre": ("剧院", "劇院"), "mtr service station": ("港铁服务站", "港鐵服務站"),
-    "car park entrance": ("停车场入口", "停車場入口"), "security office": ("保安室", "保安室"),
-    "flagpole": ("旗杆", "旗桿"), "clock": ("时钟", "時鐘"), "": ("其他地点", "其他地點"),
+    "bus stop": ("巴士站", "巴士站"), "faculty / department": ("院系", "學院及學系"),
+    "office": ("办公室", "辦公室"), "lecture theatre": ("演讲厅", "演講廳"),
+    "": ("其他地点", "其他地點"),
+    # ...and the engine's own capability words, which reach this table as an answer's
+    # subject: "24 places for canteen", "邊度有洗手間". Two vocabularies, one renderer.
+    "canteen": ("食堂", "飯堂"), "clinic": ("诊所", "診所"),
 }
+# A capability the engine computes is not always the word the map publishes: it says
+# "defibrillator" where the map says "AED", and "water_refill" where it says "water station".
+# Folding them keeps this table free of duplicate Chinese text.
+_CAPABILITY_LABEL = {"defibrillator": "aed", "water_refill": "water station"}
 
 
 def has_service_label(text: str) -> bool:
@@ -61,8 +66,22 @@ def has_service_label(text: str) -> bool:
 
 
 def service_label(text: str, language: str) -> str:
-    """The published service label in the asked-for language, or the label unchanged."""
-    row = SERVICE_LABELS.get((text or "").lower())
+    """The label for this service or capability word, in the asked-for language.
+
+    A word that is not published verbatim is folded through the engine's vocabulary first:
+    the model reports "lunch" and the engine decides that means a canteen, so the answer is
+    allowed to say 飯堂 rather than "lunch". Words nothing can place are returned unchanged.
+    """
+    row = SERVICE_LABELS.get((text or "").strip().lower())
+    if row is None:
+        capability = facility_capability((text or "").strip().lower())
+        # Only an alias that exists: falling back to "" would land on the "other places"
+        # row and rename a word nobody could place.
+        for candidate in (capability, _CAPABILITY_LABEL.get(capability)):
+            if candidate:
+                row = SERVICE_LABELS.get(candidate)
+                if row is not None:
+                    break
     if row is None or language not in ("zh-HK", "zh-CN"):
         return text
     return row[1] if language == "zh-HK" else row[0]

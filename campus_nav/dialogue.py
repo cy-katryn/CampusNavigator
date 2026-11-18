@@ -27,7 +27,7 @@ from .landmarks import landmarks_along
 from .llm import DeepSeekClient
 from .narrate import Facts, Narration, Narrator
 from .nlu import (REOPEN, Slots, asks_for_everything, facility_words, has_cjk,
-                  names_destination, parse, parse_with_grammar, refers_to_last_distance,
+                  names_destination, parse_with_grammar, refers_to_last_distance,
                   stair_request)
 from .place_index import PlaceIndex
 from .places import (
@@ -180,9 +180,8 @@ class Dialogue:
         # The model-first path (agent.py). Built lazily, because the client may be replaced
         # when a key is entered in the settings dialog.
         self._agent = None
-        # Whether this turn may use the model for anything besides the agent loop. The agent
-        # turns it off when the model is unreachable, so the grammar fallback does not ask
-        # the same dead endpoint a second and third time.
+        # Whether this turn may use the model at all. The agent turns it off when the model
+        # is unreachable, so the fallback does not then ask the same dead endpoint to narrate.
         self._llm_ok_for_turn = True
         # The agent writes the prose itself; narration would ask the model again.
         self.narrate = True
@@ -245,55 +244,22 @@ class Dialogue:
                     slots.destination_text = text
                 slots.intent = "route"
 
-    def draft_slots(self, text: str) -> Slots:
-        """Preview a voice draft without running a search or changing the dialogue."""
-        slots = parse_with_grammar(text, self.places)
-        if slots.intent == "route" and slots.facility_choice is not None:
-            last = self.state.last_facilities
-            index = slots.facility_choice
-            if last and 0 <= index < len(last.rows):
-                destination = last.rows[index].get("node_id")
-                if destination in self.graph.nodes:
-                    slots.destination_text = destination
-                    slots.origin_text = last.route_origin
-                    slots.facility_choice = None
-            return slots
-        self._interpret_pending_place(stair_request(text)[0], slots)
-        return slots
-
-    def draft_endpoints(self, text: str) -> dict | None:
-        slots = self.draft_slots(text)
-        if slots.intent not in ("route", "distance") or slots.facility_choice is not None:
-            return None
-        inherit = slots.mentions_places or slots.avoid_stairs is not None or refers_to_last_distance(text)
-        endpoints = {}
-        for role, phrase in (("origin", slots.origin_text), ("destination", slots.destination_text)):
-            matches = self._preferred_matches(phrase) if phrase else []
-            node_id = matches[0].id if len(matches) == 1 else None
-            if not phrase and inherit:
-                node_id = getattr(self.state, role)
-            endpoints[role] = {"text": phrase, "id": node_id}
-        return endpoints
-
-    def handle(self, text: str, *, endpoints: dict | None = None,
-               language: str | None = None) -> Reply:
+    def handle(self, text: str, *, language: str | None = None) -> Reply:
         """Answer one message, and remember the exchange for the next one.
 
         With a model configured, the model drives the turn through the tools in `agent.py`;
-        the grammar answers only when there is no model, when the endpoints came from the map
-        (a click is not language), or when the model could not be reached at all. The
-        engine's state stays the authority for facts in either case.
+        the grammar answers when there is no model, or when the model could not be reached at
+        all. The engine's state stays the authority for facts in either case.
         """
         self._llm_ok_for_turn = self.client is not None
-        if endpoints is None:
-            agent = self.agent
-            if agent is not None:
-                reply = agent.handle(text, language)
-                if reply is not None:
-                    self._remember(text, reply)
-                    return reply
-                self._llm_ok_for_turn = False
-        reply = self._handle(text, endpoints=endpoints, language=language)
+        agent = self.agent
+        if agent is not None:
+            reply = agent.handle(text, language)
+            if reply is not None:
+                self._remember(text, reply)
+                return reply
+            self._llm_ok_for_turn = False
+        reply = self._handle(text, language=language)
         self._remember(text, reply)
         return reply
 
@@ -348,39 +314,22 @@ class Dialogue:
             return language
         return "zh-HK" if has_cjk(text) else "en-US"
 
-    def _handle(self, text: str, *, endpoints: dict | None = None,
-                language: str | None = None) -> Reply:
+    def _handle(self, text: str, *, language: str | None = None) -> Reply:
         spoken_language = self._language(text, language)
         # The facts handed to the model carry it: the model cannot see the browser, so the
         # engine has to say which language the answer is owed in.
         self.display_language = spoken_language
-        if endpoints is None and _GREETING.match(text.strip()):
+        if _GREETING.match(text.strip()):
             warm = ", ".join(self._warm_examples(spoken_language))
             return Reply(copy.t("speech.greeting", spoken_language, examples=warm),
                          notes=["greeting"])
-        if endpoints is None and _THANKS.match(text.strip()):
+        if _THANKS.match(text.strip()):
             return Reply(copy.t("speech.thanks", spoken_language), notes=["greeting"])
-        if endpoints is None:
-            digest = self._context_digest()
-            context = ([digest] if digest else []) + self.history
-            slots = parse(text, self.graph,
-                          self.client if self._llm_ok_for_turn else None,
-                          self.places, context)
-            self._interpret_pending_place(stair_request(text)[0], slots)
-        else:
-            # The selections replace only the place slots. Keep the original
-            # transcript's distance intent and restrictions (e.g. no stairs).
-            slots = self.draft_slots(text)
-            if slots.intent not in ("route", "distance") or slots.facility_choice is not None:
-                raise ValueError("These endpoints need a route question.")
-            if not isinstance(endpoints, dict) or not endpoints:
-                raise ValueError("Choose a place on the campus map.")
-            for role, node_id in endpoints.items():
-                node = self.graph.nodes.get(node_id) if isinstance(node_id, str) else None
-                if role not in ("origin", "destination") or not node or node.kind == "waypoint":
-                    raise ValueError("Choose a named place on the campus map.")
-                setattr(slots, role + "_text", node_id)
-        if endpoints is None and slots.clear_stops:
+        # The agent either answered already or could not be reached: the grammar is the whole
+        # parser on this path.
+        slots = parse_with_grammar(text, self.places)
+        self._interpret_pending_place(stair_request(text)[0], slots)
+        if slots.clear_stops:
             # "no stops", "just the direct route": drop the places added along the way and
             # plan the walk again without them. The parser read the words; the state change
             # is the dialogue's.
@@ -1319,12 +1268,16 @@ class Dialogue:
                 matching = self.places.semantic_places(subject)
                 by_meaning = bool(matching)
         if not matching:
+            # The user's own phrase, not just the amenity word: with an empty "item" the
+            # subject here is what they actually said, and rendering it as "" produced
+            # "no record for 其他地點" (the label table's empty-row fallback).
+            said = raw or subject
             reply = self._dont_know(
-                raw,
+                said,
                 why=("no facility on the map accepts that item"
                      if not wants_service else "I have no such facility on the map"))
             reply.slots = slots
-            reply.facility_result = FacilityResult("no_match", raw)
+            reply.facility_result = FacilityResult("no_match", said)
             return reply
 
         # Nobody has said where they are: distances come from the map reference, and the

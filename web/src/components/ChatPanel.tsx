@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef } from 'react';
 import { RotateCcw, Send } from 'lucide-react';
 import type { ChatMessage } from '../types';
 import { AvatarDock, type AvatarState } from './AvatarDock';
@@ -19,7 +19,6 @@ export interface ChatPanelProps {
   canReplay: boolean;
   busy: boolean;
   sendBlocked: boolean;
-  editor: ReactNode;
   onReplay(): void;
   /** Increments when something outside the panel wants the composer focused. */
   focusSignal: number;
@@ -87,7 +86,6 @@ export function ChatPanel(props: ChatPanelProps) {
         onLangChange={props.onLangChange}
       />
 
-      {props.editor}
       <form
         className="flex gap-2 px-4 py-3"
         data-composer-form

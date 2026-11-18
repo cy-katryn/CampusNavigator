@@ -25,7 +25,6 @@ Endpoints
     GET  /api/status       engine mode, graph source, knowledge-base coverage
     GET  /api/graph        nodes + edges, for drawing the map
     POST /api/chat         {"text": "...", "lang": "zh-HK"} -> one reply (lang optional)
-    POST /api/route-draft   preview the start and destination without sending the question
     GET  /api/speech-status   local Whisper availability and maximum recording length
     POST /api/transcribe?lang=zh-HK    PCM WAV -> editable transcript
     POST /api/reset        clear the conversation state
@@ -271,10 +270,8 @@ def route_option(graph: CampusGraph, route, lang: str = "en-US") -> dict | None:
 
 
 def _parser_label(slots) -> str:
-    """'agent', or 'grammar (model abstained)' and friends: which layer decided, and why."""
-    source = getattr(slots, "source", "") or ""
-    note = (getattr(slots, "parse_note", "") or "").strip()
-    return f"{source} ({note})" if source and note else source
+    """Which layer decided this turn: "agent", or "grammar" when the model did not answer."""
+    return getattr(slots, "source", "") or ""
 
 
 def chat_payload(graph: CampusGraph, reply, lang: str = "en-US") -> dict:
@@ -587,7 +584,7 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/api/transcribe":
             return self._transcribe()
-        if path in ("/api/chat", "/api/route-draft"):
+        if path == "/api/chat":
             payload = self._read_json()
             if not isinstance(payload, dict):
                 return self._json({"error": "Expected a question."}, 400)
@@ -597,21 +594,10 @@ class Handler(BaseHTTPRequestHandler):
             lang = payload.get("lang", "en-US")
             if lang not in ("zh-CN", "zh-HK", "en-US"):
                 lang = "en-US"
-            if path == "/api/route-draft":
-                try:
-                    with LOCK:
-                        draft = self.app.dialogue_for(self._session()).draft_endpoints(text)
-                except (PlaceIndexError, EmbeddingError, PineconeError) as exc:
-                    return self._json({"error": f"place index unavailable: {exc}"}, 502)
-                if draft is None:
-                    return self._json({"is_route": False})
-                for item in draft.values():
-                    item["label"] = place_name(self.app.graph, item["id"], lang) if item["id"] else item["text"]
-                return self._json({"is_route": True, **draft})
             try:
                 with LOCK:
                     reply = self.app.dialogue_for(self._session()).handle(
-                        text, endpoints=payload.get("endpoints"), language=lang)
+                        text, language=lang)
             except ValueError as exc:
                 return self._json({"error": str(exc)}, 400)
             except (PlaceIndexError, EmbeddingError, PineconeError) as exc:

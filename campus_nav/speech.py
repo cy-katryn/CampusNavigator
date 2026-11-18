@@ -66,14 +66,39 @@ class LocalTranscriber:
         self.cli = PROJECT_ROOT / Path(cli).expanduser()
         self.model = PROJECT_ROOT / Path(model).expanduser()
         self._lock = threading.Lock()
+        self._probe: str | None = None
 
     def status(self) -> dict:
         error = ""
-        if not self.cli.is_file() or not os.access(self.cli, os.X_OK):
-            error = "The local Whisper executable is missing or cannot be run."
+        if not self.cli.is_file():
+            error = "The local Whisper executable is missing. Run: python tools/setup_voice.py"
         elif not self.model.is_file() or not os.access(self.model, os.R_OK):
-            error = "The local Whisper speech model is missing or cannot be read."
+            error = ("The local Whisper speech model is missing or cannot be read. "
+                     "Run: python tools/setup_voice.py")
+        else:
+            error = self._probe_error()
         return {"available": not error, "max_seconds": MAX_SECONDS, "error": error}
+
+    def _probe_error(self) -> str:
+        """Run the binary once. A file that exists is not a program that starts.
+
+        A whisper.cpp build produced by MinGW links against the compiler's own runtime
+        (libstdc++, libgcc, libwinpthread, libgomp), which is not copied by the build. The
+        executable then exists, is readable, and dies on start -- so "available" was true
+        while every recording failed with "could not decode this recording".
+        """
+        if self._probe is None:
+            try:
+                done = subprocess.run([str(self.cli), "--help"], capture_output=True, timeout=60)
+                message = " ".join(done.stderr.decode("utf-8", "replace").split())[:160]
+                self._probe = "" if (done.returncode == 0 or done.stdout) else (
+                    "The local Whisper executable cannot start"
+                    + (f": {message}" if message else f" (exit {done.returncode})."))
+            except subprocess.TimeoutExpired:
+                self._probe = "The local Whisper executable did not answer within a minute."
+            except OSError as exc:
+                self._probe = f"The local Whisper executable cannot start: {exc}"
+        return self._probe
 
     def transcribe(self, audio: bytes, lang: str) -> str:
         if lang not in LANGUAGES:
@@ -95,13 +120,21 @@ class LocalTranscriber:
                 [str(self.cli), "-m", str(self.model), "-l", language,
                  "--prompt", PROMPT_INTROS[lang] + CAMPUS_NAMES,
                  "-t", "4", "-nt", "-np", "-otxt", "-of", "-", "-f", "-"],
-                input=wav, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                input=wav, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 check=True, timeout=90,
             )
         except subprocess.TimeoutExpired as exc:
             raise SpeechError(504, "Local transcription timed out. Try a shorter recording.") from exc
         except (OSError, subprocess.CalledProcessError) as exc:
-            raise SpeechError(503, "The local speech engine could not decode this recording.") from exc
+            # Keep the engine's own complaint: "could not decode this recording" on its own
+            # sends the reader looking for a problem with their microphone.
+            detail = ""
+            if isinstance(exc, subprocess.CalledProcessError) and exc.stderr:
+                line = exc.stderr.decode("utf-8", "replace").strip().splitlines()
+                detail = f" ({line[-1][:160]})" if line else f" (exit {exc.returncode})"
+            raise SpeechError(
+                503, "The local speech engine could not decode this recording." + detail
+            ) from exc
         finally:
             self._lock.release()
         # whisper-cli puts each successive segment on its own line.

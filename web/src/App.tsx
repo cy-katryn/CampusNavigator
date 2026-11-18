@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchGraph, fetchStatus, resetSession, sendChat } from './api';
-import { useRouteDraft } from './components/RouteDraft';
 import { ChatPanel } from './components/ChatPanel';
 import { MapPanel } from './components/MapPanel';
 import { SettingsDialog } from './components/SettingsDialog';
@@ -117,15 +116,12 @@ export default function App() {
   const nextId = useRef(SAVED.messages.reduce((n, message) => Math.max(n, message.id + 1), 1));
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
-  const [dictated, setDictated] = useState(false);
   const [lastReply, setLastReply] = useState<{ text: string; lang: string } | null>(null);
   const [playHint, setPlayHint] = useState('');
   const autoRead = useRef(voiceOn);
-  const recognition = useSpeechRecognition((text, final) => {
+  const recognition = useSpeechRecognition((text) => {
     setDraft(text);
-    setDictated(final);
   });
-  const routeDraft = useRouteDraft(draft, lang, graph, dictated);
   const micActive = recognition.phase !== 'idle';
   const micLabel = !micActive ? 'Speak' : recognition.phase === 'listening' ? 'Finish' : 'Cancel';
 
@@ -153,20 +149,17 @@ export default function App() {
 
   const send = async (text: string, fromComposer = false) => {
     const trimmed = text.trim();
-    if (!trimmed || pending.current || (fromComposer && (micActive || routeDraft.blocked))) return;
+    if (!trimmed || pending.current || (fromComposer && micActive)) return;
     pending.current = true;
     setBusy(true);
     recognition.cancel();
     stopPlayback();
-    const endpoints = fromComposer ? routeDraft.endpoints : undefined;
-    const confirmation = fromComposer ? routeDraft.confirmation : undefined;
-    push('user', confirmation ? trimmed + '\n' + confirmation : trimmed);
+    push('user', trimmed);
     setDraft('');
-    setDictated(false);
     setAvatarState('thinking');
     setPlayHint('');
     try {
-      const payload = await sendChat(trimmed, lang, endpoints);
+      const payload = await sendChat(trimmed, lang);
       if (payload.error) throw new Error(payload.error);
       const id = push('bot', payload);
       const options = payload.routes || [];
@@ -229,7 +222,6 @@ export default function App() {
     recognition.cancel();
     stopPlayback();
     setDraft('');
-    setDictated(false);
     setLastReply(null);
     setPlayHint('');
     try {
@@ -283,14 +275,12 @@ export default function App() {
             else if (lastReply) play(lastReply);
           }}
           hint={playHint || recognition.hint}
-          editor={routeDraft.editor}
-          sendBlocked={busy || micActive || routeDraft.blocked || !draft.trim()}
+          sendBlocked={busy || micActive || !draft.trim()}
           focusSignal={focusSignal}
           routeMessageId={routeMessageId}
           routeSelection={routeSelection}
           onDraftChange={(text) => {
             if (micActive) recognition.cancel();
-            if (!text.trim()) setDictated(false);
             setDraft(text);
           }}
           onSend={(text) => void send(text, true)}
@@ -302,7 +292,6 @@ export default function App() {
           }}
           onMic={() => {
             if (!micActive) {
-              setDictated(false);
               stopPlayback();
               setPlayHint('');
             }
@@ -328,7 +317,6 @@ export default function App() {
           mapRef={mapRef}
           onPrefill={(text) => {
             recognition.cancel();
-            setDictated(false);
             setDraft(text);
             setFocusSignal((n) => n + 1);
           }}

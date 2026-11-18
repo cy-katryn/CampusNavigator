@@ -154,8 +154,15 @@ class Settings:
 def get_settings() -> Settings:
     load_env()
     return Settings(
-        api_key=os.environ.get("DEEPSEEK_API_KEY", "").strip(),
-        model=os.environ.get("DEEPSEEK_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL,
+        # The client speaks the OpenAI chat-completions protocol, so any compatible endpoint
+        # works: DeepSeek is only the default. LLM_* wins, and the older DEEPSEEK_* names are
+        # still read so an existing .env keeps working.
+        api_key=(os.environ.get("LLM_API_KEY")
+                 or os.environ.get("DEEPSEEK_API_KEY", "")).strip(),
+        model=(os.environ.get("LLM_MODEL") or os.environ.get("DEEPSEEK_MODEL")
+               or DEFAULT_MODEL).strip() or DEFAULT_MODEL,
+        base_url=(os.environ.get("LLM_BASE_URL", "").strip().rstrip("/")
+                  or "https://api.deepseek.com/v1"),
         llm_enabled=_flag("LLM_ENABLED", True),
         timeout_s=_int("LLM_TIMEOUT", 20),
         narrate=_flag("LLM_NARRATE", True),

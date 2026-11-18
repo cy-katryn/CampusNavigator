@@ -438,8 +438,12 @@ class PlaceIndex:
         # twenty-five toilets) keep their own answers.
         buildings = [pair for pair in hits if pair[1].kind != "facility"]
         if buildings and len(hits) > len(buildings):
+            # name_parts() is the one place that knows a bracket may be written "(" or "（":
+            # splitting on "(" here left a full-width name whole, and the rule then compared
+            # the entire name against the phrase.
             features = {pair[1].id for pair in hits if pair[1].kind == "facility"
-                        and not (set(lexical.normalise(pair[1].name.split("(")[0])) & said)}
+                        and not (set(lexical.normalise(lexical.name_parts(pair[1].name)[0]))
+                                 & said)}
             if features:
                 hits = [pair for pair in hits if pair[1].id not in features]
 

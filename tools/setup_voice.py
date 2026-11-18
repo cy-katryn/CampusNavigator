@@ -60,7 +60,33 @@ def install_cli(work: Path) -> None:
     subprocess.run([str(binary), "--help"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
     bin_dir = VOICE_DIR / "bin"
     bin_dir.mkdir(exist_ok=True)
-    binary.replace(bin_dir / name)
+    installed = bin_dir / name
+    binary.replace(installed)
+    copy_runtime_dlls(bin_dir)
+    # Verify the copy, not the build: the build tree has the compiler's runtime beside it.
+    done = subprocess.run([str(installed), "--help"], capture_output=True)
+    if done.returncode != 0 and not done.stdout:
+        message = " ".join(done.stderr.decode("utf-8", "replace").split())[:200]
+        raise ValueError(f"the installed executable does not start ({message or done.returncode})")
+
+
+# A whisper.cpp build made with MinGW links against the compiler's own runtime, which the
+# build does not copy. The executable then exists and dies on start, and the app reported
+# "available: true" while every recording failed.
+RUNTIME_DLLS = ("libstdc++-6.dll", "libgcc_s_seh-1.dll", "libwinpthread-1.dll", "libgomp-1.dll")
+
+
+def copy_runtime_dlls(bin_dir: Path) -> None:
+    if os.name != "nt":
+        return
+    compiler = shutil.which("g++") or shutil.which("gcc")
+    if not compiler:
+        return
+    source = Path(compiler).resolve().parent
+    for name in RUNTIME_DLLS:
+        candidate = source / name
+        if candidate.is_file():
+            shutil.copy2(candidate, bin_dir / name)
 
 
 def main() -> None:

@@ -81,7 +81,7 @@ def tokenize(text: str) -> list[str]:
 # --------------------------------------------------------------------- documents
 @dataclass
 class Doc:
-    """One retrievable unit: a place, or a green facility."""
+    """One retrievable unit: a place or a facility."""
 
     id: str
     kind: str                    # "place"
@@ -239,15 +239,7 @@ class KnowledgeBase:
 
     @classmethod
     def from_raw(cls, raw_dir: str | Path) -> "KnowledgeBase":
-        """Read the published records, joined to the map by *title*.
-
-        There used to be a node-id join here: the scraped record's poi_id was matched
-        against the graph's ref. It never matched once -- the graph carries short ids
-        ("POI_5bcd371552_10") and the scrape carries 24-character hex ones -- so the index it
-        built was always empty and every lookup fell through to the title. The title is what
-        the two sources genuinely share (326 of 329 node names are published titles), so it
-        is now the only join, in one place, by_title().
-        """
+        """Read the published records, joined to the map by *title*."""
         raw = Path(raw_dir)
         docs: list[Doc] = []
 
