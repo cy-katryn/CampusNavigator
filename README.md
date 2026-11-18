@@ -58,6 +58,22 @@ choose from it, so any need without a label got the nearest wrong one — "I wan
 swim" became *water station*, confidently. It is not that the model is weak: it was asked a
 question whose answer requires the campus, and it cannot see the campus.
 
+### Where the bilingual code lives
+
+Chinese is not a special case bolted onto English logic; it is data in four places, and no
+module branches on language to decide *what to do*:
+
+| layer | file | what is bilingual there |
+|---|---|---|
+| reading | `nlu.py` | the grammar patterns (one regex, alternation) and the day words |
+| wording | `copy.py` | every sentence, keyed by language, English mandatory as the fallback |
+| naming | `local_names.py` | place, building, floor and service labels in both scripts |
+| shapes | `format.py` | nothing — it returns rows, days and states, never prose |
+
+`render.py` composes the four into a sentence. The test that keeps this honest is
+`test_render.py`: every message must have English, a missing language falls back to it, and
+an unknown key is a bug rather than a translation gap.
+
 ### What the conversation remembers, and for how long
 
 Three separate stores, each with a different job and a different lifetime:
@@ -278,7 +294,7 @@ than inventing a route. To change the map: edit a GeoJSON in `data/authored/`, r
 ## Tests
 
 ```bash
-python -m pytest tests -q      # 91 tests + 24 subtests: no network, no keys, no server
+python -m pytest tests -q      # 109 tests + 24 subtests: no network, no keys, no server
 ```
 
 | File | What it pins |
@@ -287,6 +303,7 @@ python -m pytest tests -q      # 91 tests + 24 subtests: no network, no keys, no
 | `tests/test_llm_path.py` | the model path against a stubbed client: slot echo, id→name, closure evidence, every fallback, grounded numbers |
 | `tests/test_dialogue.py` | walk time, an ambiguous closure that names its candidates, close-then-re-open, greetings, "Core Y" → "did you mean Block Y", "did you mean" on a misspelt place |
 | `tests/test_place_index.py` | name resolution in both modes: the name-evidence gate, one answer per name, the lexical band |
+| `tests/test_render.py` | the catalogue and the renderer: English present for every message, a missing language falls back, an unknown key is a bug, each arm says what it was given |
 | `tests/test_robustness.py` | the properties, over phrasings written *after* the fixes and unlike them: filler names no place, a code resolves exactly or not at all, a preposition is not a route, a trailing stop is a stop, an overview question is not a journey, and a need is answered by places that mean the same thing |
 | `tests/test_cjk_names.py` | Chinese name evidence: head-final matching inside a bracket, place before facility |
 | `tests/test_landmarks.py` | landmarks along a route: the 20 m band, order along the walk, the cap, buildings only |
@@ -297,6 +314,12 @@ python -m pytest tests -q      # 91 tests + 24 subtests: no network, no keys, no
 | Path | What |
 |---|---|
 | `campus_nav/` | the application: graph, A*/UCS search, dialogue, NLU, knowledge base, place index (embeddings + vector store) and its offline scorer, web server |
+| `campus_nav/copy.py` | every sentence the app says, as data, keyed by language — adding a language is a column, not a branch |
+| `campus_nav/format.py` | facility and timetable *shapes* with no prose: which rows, which day, what state |
+| `campus_nav/render.py` | what gets said about a reply: narration if there is any, else the catalogue, else the reply's own words. Also the only owner of facility and timetable sentences — those used to be a second, Chinese-only layer |
+| `campus_nav/replies.py` | the reply types (`Reply`, `RouteClarification`), so the behaviours that build them do not import each other |
+| `campus_nav/hours.py` | opening hours: quote the published table, list the candidates, or say there is no table — the one behaviour that consults the knowledge base instead of the router |
+| `tools/replay.py` | replay a fixed prompt list and diff the **facts** of the answers — the safety net for refactoring (timings are ignored) |
 | `web/` | the interface source: React 18 + TypeScript, styled with Tailwind, icons from Lucide, built by Vite |
 | `campus_nav/static/` | **generated** — the built interface the server serves |
 | `tools/build.py` | build the graph, embed the place names |

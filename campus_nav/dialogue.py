@@ -17,16 +17,17 @@ import re
 from dataclasses import dataclass, field
 
 from .config import RAW_DIR, get_settings
-from .facility_speech import FacilityResult, requested_day
+from .format import FacilityResult, requested_day
 from . import lexical
 from .graph import CampusGraph, Node
 from .kb import KnowledgeBase, hours_summary, open_state, today_hours
+from . import hours
 from .landmarks import landmarks_along
 from .llm import DeepSeekClient
 from .narrate import Facts, Narration, Narrator
 from .nlu import (REOPEN, Slots, asks_for_everything, facility_words, names_destination,
                   parse, parse_with_grammar, refers_to_last_distance, stair_request)
-from .place_index import PlaceIndex, shares_a_name_word
+from .place_index import PlaceIndex
 from .places import (
     CAPABILITY_LABELS,
     SERVICE_WORDS,
@@ -34,40 +35,8 @@ from .places import (
     facility_capability,
     human_category,
 )
+from .replies import Reply, RouteClarification
 from .search import RouteResult, compare, search
-
-
-@dataclass
-class RouteClarification:
-    role: str
-    query: str = ""
-    candidates: tuple[str, ...] = ()
-    known_place: str = ""
-
-
-@dataclass
-class Reply:
-    text: str
-    route: RouteResult | None = None
-    slots: Slots | None = None
-    notes: list[str] = field(default_factory=list)
-    narrated: bool = False        # True when the model wrote the prose
-    # Structured places the reply is talking about, so a map or a card view can
-    # render them without re-parsing the prose.
-    facilities: list[dict] = field(default_factory=list)
-    # Every route worth offering, cheapest first. `route` is routes[0]; the rest are
-    # real alternatives the user can pick between.
-    routes: list[RouteResult] = field(default_factory=list)
-    # What a text-to-speech engine should say. Set explicitly by the handler, because
-    # reading the printed table aloud is unlistenable and guessing here would let the
-    # audio drift from the screen.
-    spoken: str = ""
-    # A one-line fact this reply has to lead with, whatever the prose says. A closure is
-    # the reason a route changed, so "Closed Catering Outlets." goes first, in one fixed
-    # wording -- leaving it in the collapsed details hid the cause of the answer.
-    lead_prefix: str = ""
-    clarification: RouteClarification | None = None
-    facility_result: FacilityResult | None = None
 
 
 @dataclass
@@ -1275,7 +1244,8 @@ class Dialogue:
     def _facilities(self, slots: Slots) -> Reply:
         """'where is the nearest AED', 'where is the water station', 'what is there'."""
         raw = (slots.item or "").strip().lower()
-        wants_service = any(w in raw for w in SERVICE_WORDS) or bool(facility_capability(raw) != raw)
+        # One matcher decides this: the same table that turns wording into a capability.
+        wants_service = bool(amenity_in_text(raw)) or bool(facility_capability(raw) != raw)
 
         subject = (raw or (slots.subject or "")).strip()
         if not raw and (not subject or asks_for_everything(subject)):
@@ -1302,9 +1272,19 @@ class Dialogue:
         # wording either is in the user's words or it is not.
         matching: list[Node] = self._service_matches(slots) if raw else []
         by_meaning = False
+        named = False
         if not matching and subject:
-            matching = self.places.semantic_places(subject)
-            by_meaning = bool(matching)
+            # A phrase can *name* a place or *describe* one, and the two want different
+            # searches. "Where is the library" names Block L; asked to describe it instead,
+            # the facility records came back with the defibrillator mounted inside the
+            # library, the café inside it and a bookshop, defibrillator nearest. The
+            # resolver already knows which case this is -- it answers only when the words
+            # carry a name -- so it is asked first and the meaning search is the fallback.
+            matching = self._preferred_matches(subject)
+            named = bool(matching)
+            if not matching:
+                matching = self.places.semantic_places(subject)
+                by_meaning = bool(matching)
         if not matching:
             reply = self._dont_know(
                 raw,
@@ -1329,8 +1309,13 @@ class Dialogue:
         cards = [self._card(n, reference) for n in matching[:5]]
         capability = facility_capability(raw)
         label = human_category(capability) if capability != raw else raw
-        head = (f'Closest places for "{raw or slots.subject}":' if by_meaning
-                else f"{len(matching)} place(s) for {label}:")
+        if named and len(matching) == 1:
+            # The question named this place; it is not a search result to be counted.
+            head = f'{cards[0]["name"]}:'
+        elif by_meaning:
+            head = f'Closest places for "{raw or slots.subject}":'
+        else:
+            head = f"{len(matching)} place(s) for {label}:"
         lines = [head]
         for card in cards:
             bits = [card["name"]]
@@ -1465,218 +1450,12 @@ class Dialogue:
                          facility_result=FacilityResult("no_route", rows=[card]))
         kind = "hours" if slots.intent == "hours_query" or last.kind == "hours_options" else "selected"
         info = FacilityResult(kind, last.subject, reference=last.reference, rows=[card],
-                              day=requested_day(slots.subject) or last.day, route_origin=last.route_origin)
+                              day=requested_day(slots.when or slots.subject) or last.day, route_origin=last.route_origin)
         self.state.last_facilities = info
         return Reply(card.get("hours_summary") or card["name"], slots=slots, facility_result=info,
                      facilities=[card] if node_id in self.graph.nodes else [])
-
-    def _document_card(self, doc):
-        # KB documents can publish a timetable even for places that have no
-        # routable node. Such a document can be listed, but has no map marker.
-        matches = [n for n in self.graph.nodes.values() if n.name.casefold() == doc.title.casefold()]
-        campus = [n for n in matches if n.source == "campus-map"]
-        matches = campus or matches
-        node = matches[0] if len(matches) == 1 else None
-        card = self._card(node) if node else {"node_id": "", "name": doc.title}
-        card.update(name_zh=doc.fields.get("name_zh", ""), name_zh_cn=doc.fields.get("name_zh_cn", ""),
-                    opening_hours=doc.hours, hours_today=today_hours(doc.hours),
-                    hours_summary=hours_summary(doc.hours), open_now=open_state(doc.hours)[0])
-        return card
-
-    def _chinese_hours(self, slots):
-        query = slots.subject.casefold()
-        day = requested_day(query)
-        kb = self.knowledge
-        # An explicit official name takes priority over a generic category.
-        # Match both published Chinese names and spoken English names within a Chinese sentence.
-        docs = kb.docs if kb else []
-        named = []
-        for doc in docs:
-            if doc.source != "campus-map":
-                continue
-            names = [doc.title, doc.fields.get("name_zh", ""), doc.fields.get("name_zh_cn", "")]
-            size = max((len(n) for n in names if len(n) >= 2 and n.casefold() in query), default=0)
-            if size:
-                named.append((size, doc))
-        if named:
-            longest = max(size for size, _ in named)
-            records = [doc for size, doc in named if size == longest]
-        else:
-            # A generic question about a category may need a choice. Never
-            # substitute a similarly named clinic's timetable for an unknown name.
-            generic = re.sub(r"(?:星期|禮拜|礼拜|[週周])[一二三四五六日天]|公[眾众]假[期日]|明[天日]|聽日|听日|"
-                             r"今日|今天|現在|现在|而家|依家|[請请][問问]?|[邊边哪]一?[個个家間间]|"
-                             r"[開开]放[時間时间]*|[營营][業业][時間时间]*|[時时][間间]|[幾几][點点時时]|"
-                             r"什[么麼][時时]候|[開开關关][門门館馆]?|有冇|[仲還还]有|[了咗]?嗎|[呢呀啊吗的嘅？? ，,]", "", query)
-            generic_facility = slots.item and (not generic or generic == slots.facility_target.casefold()
-                                  or bool(re.fullmatch(r"[食飯饭膳餐][堂廳厅]|[診诊]所|洗手[間间]|[飲饮]水[機机]|[書书]店|[銀银]行|AED", generic, re.I)))
-            records = [doc for doc in docs if generic_facility and
-                       doc.fields.get("category", "").lower() == slots.item] if slots.item else []
-            if not records:
-                topic = generic or slots.item or slots.subject
-                places = self._preferred_matches(topic)
-                if len(places) == 1:
-                    known = self._card(places[0])
-                    info = FacilityResult("hours", rows=[known], day=day)
-                    return Reply(known["hours_summary"] or known["name"], slots=slots,
-                                 facility_result=info, facilities=[known])
-                if generic_facility:
-                    matches = self._service_matches(slots)
-                    if matches:
-                        cards = [self._card(n) for n in matches[:5]]
-                        info = FacilityResult("hours_options" if len(matches) > 1 else "hours",
-                                              slots.item, len(matches), rows=cards, day=day)
-                        return Reply(cards[0]["name"], slots=slots, facility_result=info, facilities=cards)
-                return Reply(f'No published record for "{topic}".', slots=slots,
-                             facility_result=FacilityResult("no_match", topic))
-
-        cards = [self._document_card(doc) for doc in records[:5]]
-        info = FacilityResult("hours" if len(records) == 1 else "hours_options", slots.item,
-                              len(records), rows=cards, day=day)
-        return Reply(cards[0]["hours_summary"] or cards[0]["name"], slots=slots,
-                     facilities=[c for c in cards if c.get("node_id")], facility_result=info)
-
     def _hours(self, slots: Slots) -> Reply:
-        """Opening hours. Quotes the published table, or says there is not one."""
-        if slots.language == "zh":
-            return self._chinese_hours(slots)
-        kb = self.knowledge
-        if kb is None:
-            return self._dont_know(slots.subject or slots.item, why="no knowledge base is loaded")
-
-        # A named clinic can be in the official directory even if its graph
-        # node's service field was left empty. Prefer its own published hours.
-        query = slots.subject.casefold()
-        named_docs = [doc for doc in kb.docs if doc.source == "campus-map" and doc.hours and
-                      len(doc.title) > 2 and doc.title.casefold() in query]
-        if len(named_docs) == 1:
-            card = self._document_card(named_docs[0])
-            _, why = open_state(named_docs[0].hours)
-            text = (f'{card["name"]}:\n  {card["hours_summary"]}\n  Right now: {why}.'
-                    "\nSource: PolyU campus map.")
-            spoken = f'{card["name"]}. Today: {card["hours_today"] or "no hours published"}. {why}.'
-            return Reply(text, slots=slots, facilities=[card] if card.get("node_id") else [],
-                         spoken=spoken, facility_result=FacilityResult("hours", rows=[card]))
-
-        # 1) the question names something the map can resolve
-        matching = self._service_matches(slots, slots.subject)
-        # 1a) ... and if the question names one specific place ("the dental clinic"), the
-        #     resolver picks that one out of the group before anything is printed. "The
-        #     canteen" names twenty-four of them, so nothing is narrowed and the list is the
-        #     answer. (This narrowed by the record's node id, which never matched a node, and
-        #     then by BM25 title score, which happily picked one canteen out of twenty-four.)
-        if len(matching) > 1 and (slots.subject or slots.item):
-            wanted = {node.id for node in matching}
-            named = [node for node in self.places.resolve(slots.subject or slots.item)
-                     if node.id in wanted]
-            if len(named) == 1:
-                matching = named
-        if len(matching) > 1:
-            # prefer the candidates that actually publish a table
-            documented = [n for n in matching if (kb.by_title(n.name) and kb.by_title(n.name).hours)]
-            if documented:
-                matching = documented
-        if len(matching) > 1:
-            matching.sort(key=lambda n: (self._distance_from(n) or 0.0))
-            cards = [self._card(n) for n in matching[:5]]
-            lines = [f"{len(matching)} places match; hours published for today:"]
-            for card in cards:
-                if card["hours_today"]:
-                    hours = card["hours_today"]
-                elif card["hours_summary"]:
-                    hours = "no hours published for today (other days are)"
-                else:
-                    hours = "hours not published"
-                lines.append(f'  - {card["name"]}: {hours}')
-            lines.append("Which one do you mean?")
-            first = cards[0]
-            spoken = (
-                f"{len(matching)} places match. The nearest is {first['name']}, "
-                f"today {first['hours_today'] or 'closed'}. The rest are on screen."
-            )
-            info = FacilityResult("hours_options", slots.item, len(matching), rows=cards)
-            return Reply("\n".join(lines), slots=slots, facilities=cards, spoken=spoken, facility_result=info)
-
-        if len(matching) == 1:
-            node = matching[0]
-            card = self._card(node)
-            if card["hours_summary"]:
-                text = (
-                    f'{card["name"]}'
-                    + (f' ({card["address"]})' if card["address"] else "")
-                    + f':\n  {card["hours_summary"]}'
-                    + f'\n  Right now: {card["open_reason"]}.'
-                    + "\nSource: PolyU campus map. Hours change on public holidays, which"
-                      " I do not have a calendar for."
-                )
-                reason = card["open_reason"]
-                spoken = (
-                    f'{card["name"]}. Today: {card["hours_today"] or "closed"}. '
-                    f'{reason[:1].upper()}{reason[1:]}.'
-                )
-                return Reply(text, slots=slots, facilities=[card], spoken=spoken,
-                             facility_result=FacilityResult("hours", rows=[card]))
-            return Reply(
-                f'The campus map does not publish opening hours for {card["name"]}. '
-                f'I can tell you where it is'
-                + (f' ({card["address"]})' if card["address"] else "")
-                + " and draw a route, but I will not guess its hours.",
-                slots=slots, facilities=[card],
-                facility_result=FacilityResult("hours", rows=[card]),
-                spoken=f'I do not have opening hours for {card["name"]}. '
-                       f'I can show you where it is and draw a route.')
-
-        # 2) retrieval: the question may name a place the service index does not cover
-        query = slots.subject or slots.item
-        hits = kb.search(query, k=6, min_score=1.0) if query else []
-
-        # If the question names a place the map knows, answer about THAT place.
-        # "When does the library open?" must not be answered with whichever document
-        # happened to score highest -- quoting a table that belongs to somewhere else
-        # is worse than admitting the table does not exist.
-        named = [node for node in self._preferred_matches(query)] if query else []
-        if named:
-            labels = [named[0].name.lower()]
-            inner = named[0].name.split("(")[-1].rstrip(")").strip()
-            if inner and inner.lower() != labels[0]:
-                labels.append(inner.lower())
-            narrowed = [
-                (score, doc) for score, doc in hits
-                if any(label in doc.title.lower() for label in labels)
-            ]
-            if narrowed:
-                hits = narrowed
-            elif hits:
-                return Reply(
-                    f'The campus map does not publish opening hours for "{named[0].name}". '
-                    "I can tell you where it is or draw a route, but I will not guess its "
-                    "hours.",
-                    slots=slots,
-                    facility_result=FacilityResult("hours", rows=[self._card(named[0])]),
-                )
-
-        for score, doc in hits:
-            if doc.hours:
-                _is_open, why = open_state(doc.hours)
-                text = (
-                    f'{doc.title}:\n  {hours_summary(doc.hours)}'
-                    + f'\n  Right now: {why}.'
-                    + "\nSource: PolyU campus map."
-                )
-                spoken = f'{doc.title}. Today: {today_hours(doc.hours) or "closed"}. {why[:1].upper()}{why[1:]}.'
-                return Reply(text, slots=slots, spoken=spoken,
-                             facility_result=FacilityResult("hours", rows=[self._document_card(doc)]))
-        if hits:
-            doc = hits[0][1]
-            return Reply(
-                f'The campus map does not publish opening hours for "{doc.title}". '
-                "I can give you its address or draw a route instead.",
-                slots=slots,
-                facility_result=FacilityResult("hours", rows=[self._document_card(doc)]),
-            )
-        reply = self._dont_know(query, why="nothing in my knowledge base matches that")
-        reply.slots, reply.facility_result = slots, FacilityResult("no_match", query)
-        return reply
+        return hours.ask(self, slots)
 
     def _dont_know(self, subject: str, why: str = "") -> Reply:
         """The honest answer. Names the gap and what the bot does cover."""

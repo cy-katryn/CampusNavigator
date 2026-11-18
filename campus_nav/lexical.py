@@ -34,6 +34,7 @@ embedding index on the same scale.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from .graph import CampusGraph, Node
 
@@ -86,6 +87,16 @@ def singular(word: str) -> str:
     return word[:-1]
 
 
+def fold(text: str) -> str:
+    """Strip diacritics, because nobody types them: "LibCafe" is how the café is asked for.
+
+    Decomposing and dropping the combining marks is the whole of it; Chinese has no
+    combining marks, so this is a no-op for the names in the other script.
+    """
+    return "".join(char for char in unicodedata.normalize("NFKD", text or "")
+                   if not unicodedata.combining(char))
+
+
 def normalise(text: str) -> list[str]:
     """"The words a phrase is about": lowercased, filler dropped, block letters kept.
 
@@ -94,7 +105,7 @@ def normalise(text: str) -> list[str]:
     near-ties. The exception is the letter in "Core A" / "Block Y", where the letter IS
     the place.
     """
-    words = " ".join((text or "").lower().replace("_", " ").split()).split()
+    words = " ".join(fold(text).lower().replace("_", " ").split()).split()
     # Sentence punctuation is not part of a word: "closed today." must still be read as
     # "closed" + "today", or the filler word survives and poisons the phrase.
     words = [word.strip(".,;:!?()[]{}\"'") for word in words]

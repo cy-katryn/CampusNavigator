@@ -8,10 +8,14 @@ from __future__ import annotations
 
 import unittest
 
+from datetime import datetime, timedelta
+
 from campus_nav.config import Settings, graph_path
+from campus_nav.format import DAYS
+from campus_nav.kb import HKT
 from campus_nav import dialogue as dialogue_module
 from campus_nav.dialogue import HISTORY_TURNS, Dialogue, place_legs, walk_minutes
-from campus_nav.facility_speech import FacilityResult
+from campus_nav.format import FacilityResult
 from campus_nav.nlu import Slots
 from campus_nav.graph import CampusGraph
 from campus_nav.place_index import PlaceIndex
@@ -114,6 +118,137 @@ class DialogueTests(unittest.TestCase):
         reopened = talk.handle("re-open it")
         self.assertIn("Re-opened", reopened.text)
         self.assertEqual(len(talk.state.closed_nodes), 0)
+
+
+class PlaceNamingTests(unittest.TestCase):
+    """What a question is about: the phrase, and the building it names."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.graph = CampusGraph.load(graph_path())
+        cls.places = PlaceIndex(cls.graph, OFFLINE)
+
+    def test_the_asking_frame_is_not_part_of_the_name(self) -> None:
+        # A whole sentence is not a name: handed to the resolver, its own words matched
+        # every building on the map and "the library" was answered with a defibrillator.
+        from campus_nav.nlu import topic_phrase
+        cases = {
+            "when does the library open on Tuesday?": "library",
+            "what are the canteen's opening hours?": "canteen",
+            "is the canteen open?": "canteen",
+            "what time does the clinic close?": "clinic",
+            "when does the bookshop close?": "bookshop",
+            "Pao Yue-Kong Library": "Pao Yue-Kong Library",
+        }
+        for text, phrase in cases.items():
+            self.assertEqual(topic_phrase(text), phrase, text)
+
+    def test_the_english_name_answers_the_building(self) -> None:
+        # True before this rule as well: the building's own English name carries the word.
+        names = [node.name for node in self.places.resolve("library")]
+        self.assertEqual(names, ["Block L (Pao Yue-Kong Library)"])
+
+    def test_the_chinese_name_answers_the_building(self) -> None:
+        # 圖書館 is nobody's whole published name, so the library, the café inside it and
+        # the defibrillator inside it all came back as three equal offers. The building is
+        # what was named; the café and the AED are what stands in it.
+        for query in ("圖書館", "图书馆"):
+            names = [node.name for node in self.places.resolve(query)]
+            self.assertEqual(names, ["Block L (Pao Yue-Kong Library)"], query)
+
+    def test_a_feature_still_answers_to_its_own_words(self) -> None:
+        names = [node.name for node in self.places.resolve("AED")]
+        self.assertTrue(names, "AED must still resolve")
+        self.assertTrue(all("AED" in name for name in names), names)
+
+    def test_a_generic_category_still_lists_its_members(self) -> None:
+        # The building-over-feature rule must not swallow a question about a category.
+        names = [node.name for node in self.places.resolve("clinic")]
+        self.assertGreater(len(names), 1)
+        self.assertFalse(any(name.startswith("Block") for name in names), names)
+
+
+class _NamesAPlace:
+    """A resolver that names one place where the semantic sweep would offer four.
+
+    The dense index does this: asked to *describe* "the library" it returns the AED mounted
+    inside it, the café inside it, a bookshop, and the building -- defibrillator nearest.
+    Asked what the words *name*, it returns the building.
+    """
+
+    def __init__(self, places: PlaceIndex, named: list, described: list) -> None:
+        self._places = places
+        self._named = named
+        self._described = described
+
+    def resolve(self, _text: str) -> list:
+        return list(self._named)
+
+    def semantic_places(self, _text: str) -> list:
+        return list(self._described)
+
+    def scored(self, text: str):
+        return self._places.scored(text)
+
+
+class NamedPlaceTests(unittest.TestCase):
+    """A phrase that names a place is answered with that place, not a search result."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.graph = CampusGraph.load(graph_path())
+        cls.places = PlaceIndex(cls.graph, OFFLINE)
+        cls.library = [n for n in cls.graph.nodes.values()
+                       if n.name == "Block L (Pao Yue-Kong Library)"]
+        cls.others = [n for n in cls.graph.nodes.values()
+                      if n.name in ("AED (Library)", "LibCafé", "Bookshop")]
+
+    def test_the_named_place_answers_instead_of_the_meaning_sweep(self) -> None:
+        talk = Dialogue(self.graph, places=_NamesAPlace(self.places, self.library, self.others))
+        reply = talk._facilities(Slots(intent="facility_query", subject="library",
+                                      language="en"))
+        self.assertEqual([c["name"] for c in reply.facility_result.rows],
+                         ["Block L (Pao Yue-Kong Library)"])
+        self.assertEqual(reply.facility_result.kind, "list")
+        self.assertNotIn("place(s) for", reply.text)
+
+    def test_a_description_still_uses_the_meaning_sweep(self) -> None:
+        # "somewhere to eat" names nothing, so the sweep is the only thing that can answer.
+        talk = Dialogue(self.graph, places=_NamesAPlace(self.places, [], self.others))
+        reply = talk._facilities(Slots(intent="facility_query", subject="somewhere to eat",
+                                      language="en"))
+        self.assertEqual(len(reply.facility_result.rows), len(self.others))
+        self.assertIn("Closest places for", reply.text)
+
+
+class DayTests(unittest.TestCase):
+    """The day survives the frame strip, in both scripts."""
+
+    def test_the_day_is_read_before_the_phrase_is_cleaned(self) -> None:
+        from campus_nav.format import requested_day
+        from campus_nav.nlu import day_phrase, topic_phrase
+        # The phrase loses its frame; the day it asked about is kept beside it, because
+        # "on Tuesday" is part of the asking and the timetable still owes an answer for it.
+        self.assertEqual(topic_phrase("when does the library open on Tuesday?"), "library")
+        self.assertEqual(requested_day(day_phrase("when does the library open on Tuesday?")),
+                         "Tue")
+        # The day is asking frame in Chinese too: the name is 圖書館, and 聽日 is the day.
+        self.assertEqual(topic_phrase("圖書館聽日幾點開"), "圖書館")
+        self.assertEqual(topic_phrase("明天圖書館幾點開"), "圖書館")
+        self.assertEqual(requested_day(day_phrase("圖書館聽日幾點開")),
+                         DAYS[(datetime.now(HKT) + timedelta(days=1)).weekday()])
+        # A question that names no place at all ("what are the hours on Friday?") leaves the
+        # phrase empty -- "hours" is asking wording, not a name -- and still knows the day.
+        self.assertEqual(topic_phrase("what are the hours on Friday?"), "")
+        self.assertEqual(requested_day(day_phrase("what are the hours on Friday?")), "Fri")
+
+    def test_a_named_weekday_answers_that_weekday(self) -> None:
+        # English weekdays used to be read as no day at all, so "on Tuesday" was answered
+        # with today's hours -- a wrong answer, not an imprecise one.
+        from campus_nav.format import requested_day
+        self.assertEqual(requested_day("on Tuesday"), "Tue")
+        self.assertEqual(requested_day("sunday"), "Sun")
+        self.assertEqual(requested_day("公眾假期"), "PublicHoliday")
 
 
 class StopRoutingTests(unittest.TestCase):

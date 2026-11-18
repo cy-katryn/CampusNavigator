@@ -114,7 +114,11 @@ class Slots:
     # Block X" is two. A list rather than one string because that is what the request is --
     # the walk visits each stop in turn, so the order is part of the answer.
     vias: list[str] = field(default_factory=list)
-    subject: str = ""      # the raw words the question is *about* (hours/facility queries)
+    subject: str = ""      # the phrase the question is *about* (hours/facility queries)
+    # The day the question asks about, exactly as it was said ("Tuesday", "聽日"). It is
+    # kept apart from "subject" because taking the asking frame off the phrase takes the
+    # day with it, and the timetable still has to answer for that day.
+    when: str = ""
     language: str = "en"
     source: str = "grammar"
     # Why the grammar answered when a model was configured: "model abstained", "model
@@ -235,7 +239,8 @@ def parse_with_llm(text: str, graph: CampusGraph, client: DeepSeekClient,
               if phrase],
         along_the_way=bool(payload.get("along_the_way")),
         clear_stops=bool(payload.get("clear_stops")),
-        subject=text.strip() if intent in ("hours_query", "facility_query") else "",
+        subject=topic_phrase(text) if intent in ("hours_query", "facility_query") else "",
+        when=day_phrase(text, topic_phrase(text)),
         language=str(payload.get("language") or "en"),
         source="llm",
     )
@@ -493,13 +498,10 @@ _ZH_IS_HERE = re.compile(
     r"[當当]前位置|[這这呢][裡里裏度兒儿]|身[邊边]"
 )
 
-_FACILITY = re.compile(
-    r"\b(aed|defibrillators?|toilets?|washrooms?|restrooms?|bathrooms?|"
-    r"water stations?|water fountains?|drinking water|refill stations?|"
-    r"canteens?|cafeterias?|clinics?|atms?|banks?|post ?box(?:es)?|"
-    r"lactation rooms?|nursing rooms?|prayer rooms?|book ?stores?|book ?shops?)\b",
-    re.I,
-)
+# (There was a second amenity regex here. It listed the same words as
+# places.FACILITY_WORDS, in a different form, so the two could drift -- one knew "canteen"
+# and the other "catering", and a need understood by one was invisible to the other. The
+# table is the single source; amenity_in_text() reads it on word boundaries.)
 
 # "what facilities are there / what can I find here" -> a facilities overview
 _FACILITY_ALL = re.compile(
@@ -657,6 +659,79 @@ def _chinese_facility(text: str, places: PlaceResolver) -> Slots | None:
         slots.intent = "facility_query"
         return slots
     return None
+# A question about a place carries the place inside a frame: "when does the library open",
+# "what are the canteen's hours". Everything around the name belongs to the asking, not to
+# the name, and handing that frame to the resolver is what once answered "the library" with
+# the defibrillator inside it -- the sentence's own words matched every building on the map.
+# The engine owns this vocabulary, so it strips the frame here rather than in each caller.
+_LEADING_FRAME = re.compile(
+    r"^(?:(?:when|what|whats|where|which|how|is|are|was|were|do|does|did|can|could|"
+    r"may|should|tell|me|please|time|times|hour|hours)\b|(?:the|a|an)\b)[\s,:]*", re.I)
+_TRAILING_FRAME = re.compile(
+    r"[\s,:]*(?:\b(?:open|opens|opened|opening|close|closes|closed|closing|start|starts|"
+    r"started|starting|end|ends|ending|finish|finishes|shut|shuts|operate|operates|"
+    r"available|on|at|today|tomorrow|now|currently|right)\b.*)$", re.I)
+
+
+# The same frame in Chinese, where there are no word boundaries to rely on and the
+# question mark is often a particle. These are asking words, never part of a name: no
+# published name on this map ends in 的/呢/呀/嗎/嘅/邊/點 (checked against the graph).
+_CJK_LEADING_FRAME = re.compile(
+    r"^(?:請問|请问|請|请|我想去|我想|想去|想問|想问|想知|想搵|想找|搵|找|"
+    r"帶我去|带我去|邊度有|边度有|哪裡有|哪里有|有冇|有沒有|有無|"
+    r"如何去|怎麼去|怎么去|點去|点去|點行|点行|聽日|听日|明日|明早|明天|今日|今天|"
+    r"去|到)[\s,，、]*")
+_CJK_TRAILING_FRAME = re.compile(
+    r"(?:喺邊度|喺边度|喺邊|喺边|喺哪裏|喺哪里|在哪裡|在哪里|在哪|"
+    r"幾點開門|几点开门|幾點關門|几点关门|幾點開|几点开|幾點關|几点关|幾點|几点|"
+    r"開放時間|开放时间|營業時間|营业时间|開門時間|关门时间|"
+    r"點樣去|点样去|點去|点去|點行|点行|怎麼去|怎么去|如何去|"
+    r"邊度|边度|哪裡|哪里|位置|地址|嘅|的|呢|呀|嗎|吗|吖|啦|喇|"
+    # the day is asking frame too -- it is kept as the day, not inside the name
+    r"聽日|听日|明日|明早|明天|今日|今天|今晚|琴日|尋日)"
+    r"[\s,，、。？！?!…]*$")
+
+
+# The words that name a day, in both scripts: one place reads them, for the timetable.
+_DAY_WORD = re.compile(
+    r"公[眾众]假[期日]|公共假期|(?:星期|禮拜|礼拜|[週周])[一二三四五六日天]|明[天日]|聽日|听日|"
+    r"今日|今天|(?<![a-z])(?:mon|tues?|wed(?:nes)?|thur?s?|fri|sat(?:ur)?|sun)(?:day)?"
+    r"(?![a-z])|tomorrow|today|public\s+holiday", re.IGNORECASE)
+
+
+def day_phrase(text: str, subject: str = "") -> str:
+    """The day words a question contains, or "" when it asks about no particular day.
+
+    A day word inside the name being asked about is part of the name, not a day:
+    "Suen Chi Sun Memorial Square" is not a question about Sunday.
+    """
+    found = _DAY_WORD.findall(text or "")
+    if found and subject:
+        found = [word for word in found
+                 if not re.search(rf"(?i)(?<![a-z]){re.escape(word)}(?![a-z])", subject)]
+    return " ".join(found) if found else ""
+
+
+def topic_phrase(text: str) -> str:
+    """The phrase a question is about: "the library", not the sentence around it.
+
+    Strips the asking frame from both ends, repeatedly, because frames nest
+    ("what are the library's opening hours so far today"). A phrase that survives
+    unchanged is already the name. Empty means the question named nothing.
+    """
+    phrase = (text or "").strip().strip("?？。！!，, ")
+    for _ in range(4):
+        before = phrase
+        phrase = _LEADING_FRAME.sub("", phrase).strip()
+        phrase = _CJK_LEADING_FRAME.sub("", phrase).strip()
+        phrase = _TRAILING_FRAME.sub("", phrase).strip()
+        phrase = _CJK_TRAILING_FRAME.sub("", phrase).strip()
+        phrase = phrase.strip("?？。！!，, '\"\u2019s")
+        if phrase == before:
+            break
+    return phrase
+
+
 def parse_with_grammar(text: str, places: PlaceResolver) -> Slots:
     lowered, avoid_stairs = stair_request(text)
 
@@ -732,15 +807,13 @@ def parse_with_grammar(text: str, places: PlaceResolver) -> Slots:
 
     closed_text = lowered.strip() if _CLOSED_SAID.search(lowered) else ""
 
-    facility_hit = _FACILITY.search(lowered)
-    item = facility_hit.group(1).lower() if facility_hit else ""
+    item = amenity_in_text(lowered)
     if not item:
         # The engine owns the amenity vocabulary (places.FACILITY_WORDS): "lunch" is
-        # catering, "sick" is a clinic, "cash" is a bank. The grammar's own _FACILITY regex
-        # is a short list of the words this app used to hard-code, so a need outside it fell
-        # straight through -- "I want to grab lunch, where can I head to?" was answered with
-        # "I can find walking routes, point you to facilities...". Asking the engine's table
-        # is the same rule the dialogue uses; the grammar just had no access to it.
+        # catering, "sick" is a clinic, "cash" is a bank. The grammar used to keep its own
+        # short list of these words, so a need outside it fell straight through -- "I want to
+        # grab lunch, where can I head to?" was answered with "I can find walking routes,
+        # point you to facilities...". One table, read by both parsers.
         item = amenity_in_text(lowered)
     wants_hours = bool(_HOURS.search(lowered))
     # "the link to Core D is closed" and "the library is closed today" are reports
@@ -780,7 +853,9 @@ def parse_with_grammar(text: str, places: PlaceResolver) -> Slots:
 
     subject = ""
     if intent in ("facility_query", "hours_query"):
-        subject = text.strip()   # the knowledge base searches the user's own words
+        # The phrase, not the sentence: the knowledge base and the resolver both take a
+        # name, and a name is what is left when the asking frame is taken away.
+        subject = topic_phrase(text)
 
     return Slots(
         intent=intent,
@@ -792,6 +867,7 @@ def parse_with_grammar(text: str, places: PlaceResolver) -> Slots:
         closed_text=closed_text,
         item=item,
         subject=subject,
+        when=day_phrase(text, subject),
         language="zh" if _HAS_CJK.search(text) else "en",
         avoid_stairs=avoid_stairs,
         source="grammar",
@@ -934,6 +1010,14 @@ def parse(text: str, graph: CampusGraph, client: DeepSeekClient | None,
             window = " ".join(turn.get("content", "") for turn in (context or []))
             accepted = _validated(candidate, places, route_text or text, window)
             if accepted is not None:
+                if not accepted.item and _HAS_CJK.search(text):
+                    # The model answered in Chinese ("飯堂幾點開門" -> hours_query, need
+                    # 飯堂), and the engine's amenity table is English wording: the grammar's
+                    # Chinese service table is the same vocabulary in the other script, so it
+                    # supplies the item the model could not.
+                    chinese = _chinese_facility(text, places)
+                    if chinese is not None and chinese.item:
+                        accepted.item = chinese.item
                 accepted.avoid_stairs = (
                     avoid_stairs if avoid_stairs is not None else accepted.avoid_stairs
                 )

@@ -55,9 +55,10 @@ from .config import (
     rel,
     shapes_path,
 )
-from .dialogue import Dialogue, RouteClarification
+from .dialogue import Dialogue
 from .embeddings import EmbeddingError
-from .facility_speech import facility_details, facility_summary, local_hours
+from .format import local_hours
+from .render import facility_details, facility_speech
 from .graph import CampusGraph
 from .kb import KnowledgeBase
 from .landmarks import landmarks_along
@@ -65,6 +66,7 @@ from .llm import DeepSeekClient
 from .local_names import building_name, floor_name, localize_label, place_name
 from .narrate import Narrator
 from .pinecone import PineconeError
+from . import render
 from .place_index import PlaceIndex, PlaceIndexError
 from .places import feature_height, shape_kind
 from .speech import MAX_WAV_BYTES, LocalTranscriber, SpeechError
@@ -267,99 +269,6 @@ def route_option(graph: CampusGraph, route, lang: str = "en-US") -> dict | None:
     }
 
 
-def _clarification_summary(prompt: RouteClarification, graph: CampusGraph, lang: str) -> str:
-    """Keep the confirmed endpoint and the user's disputed words audible."""
-    origin_missing = prompt.role == "origin"
-    if lang == "zh-HK":
-        question = "你想由邊度出發？" if origin_missing else "你想去邊度？"
-        known = "目的地係" if origin_missing else "起點係"
-        unknown = f"我搵唔到「{prompt.query}」。"
-        ambiguous = f"「{prompt.query}」可能係以下幾個地方："
-    else:
-        question = "你从哪里出发？" if origin_missing else "你想去哪里？"
-        known = "目的地是" if origin_missing else "起点是"
-        unknown = f"我找不到“{prompt.query}”。"
-        ambiguous = f"“{prompt.query}”可能指以下几个地点："
-
-    context = f"{known}{localize_label(graph, prompt.known_place, lang)}。" if prompt.known_place else ""
-    if prompt.candidates:
-        context += ambiguous + "、".join(localize_label(graph, label, lang) for label in prompt.candidates) + "。"
-    elif prompt.query:
-        context += unknown
-    return context + question
-
-
-def spoken_summary(reply, graph: CampusGraph, lang: str = "en-US") -> str:
-    """A sentence meant for ears, built only from computed facts.
-
-    The screen shows the segment table; reading that table aloud would be noise. This
-    is what the text-to-speech layer says, and it is assembled from the same numbers
-    the search produced, so it cannot drift from them.
-    """
-    explicit = getattr(reply, "spoken", "") or ""
-    if explicit:
-        # the handler said what to read out; the route summary would only contradict it
-        return explicit
-
-    clarification = getattr(reply, "clarification", None)
-    if clarification and lang in ("zh-HK", "zh-CN"):
-        return _clarification_summary(clarification, graph, lang)
-
-    route = getattr(reply, "route", None)
-    if route is not None and route.reachable and route.path:
-        origin = place_name(graph, route.path[0], lang)
-        destination = place_name(graph, route.path[-1], lang)
-        # The map rounds its one-decimal metre value with JavaScript Math.round.
-        metres = int(round(route.total_metres, 1) + 0.5)
-        stairs = any(seg.stairs for seg in route.segments)
-        avoiding_stairs = route.blocking.get("avoid_stairs")
-        if lang == "zh-HK":
-            summary = f"由{origin}行去{destination}，大約 {metres} 米。"
-            if avoiding_stairs:
-                return summary + "已避開地圖標示嘅樓梯。"
-            return summary + ("途中要行樓梯。" if stairs else "地圖冇標示呢條路線有樓梯。")
-        if lang == "zh-CN":
-            summary = f"从{origin}步行到{destination}，约 {metres} 米。"
-            if avoiding_stairs:
-                return summary + "已避开地图上标记的楼梯。"
-            return summary + ("途中需要走楼梯。" if stairs else "地图上这条路线没有标注楼梯。")
-        summary = f"From {origin} to {destination} is about {metres} metres."
-        if avoiding_stairs:
-            return summary + " This route avoids all stairs marked on the map."
-        return summary + (" The route includes stairs." if stairs else " No stairs are marked on this route.")
-    if route is not None and not route.reachable:
-        if route.blocking.get("avoid_stairs"):
-            if lang == "zh-HK":
-                return "避開地圖標示嘅樓梯之後，按而家嘅條件搵唔到路線。"
-            if lang == "zh-CN":
-                return "避开地图上标记的楼梯后，按当前条件找不到路线。"
-            return "I couldn't find a route under the current restrictions that avoids all mapped stairs."
-        if lang == "zh-HK":
-            return "按而家嘅限制，搵唔到路線。你可以睇下畫面上嘅其他選擇。"
-        if lang == "zh-CN":
-            return "按当前条件找不到路线。你可以查看屏幕上的其他选项。"
-        return "I could not find a route with those restrictions. The options are on screen."
-    facilities = getattr(reply, "facilities", None) or []
-    if facilities:
-        best = facilities[0]
-        where = ", ".join(p for p in (best.get("building"), best.get("floor")) if p)
-        metres = best.get("metres")
-        parts = [f"The nearest match is {best.get('name')}"]
-        if where:
-            parts.append(f"at {where}")
-        if metres is not None:
-            parts.append(f"about {metres} metres away")
-        spoken = " ".join(parts) + "."
-        if len(facilities) > 1:
-            spoken += f" There are {len(facilities)} on the map; the others are listed on screen."
-        return spoken[:320]
-
-    text = (reply.text or "").strip()
-    first = text.split("\n\n")[0]
-    lines = [line.strip(" -") for line in first.splitlines() if line.strip()]
-    short = " ".join(lines[:3])
-    return short[:320]
-
 
 def _parser_label(slots) -> str:
     """'llm', or 'grammar (model abstained)' and friends: which layer decided, and why."""
@@ -373,11 +282,14 @@ def chat_payload(graph: CampusGraph, reply, lang: str = "en-US") -> dict:
     route = getattr(reply, "route", None)
     explicit = getattr(reply, "spoken", "")
     facilities = getattr(reply, "facilities", [])
-    facility_lead = facility_summary(reply, graph, lang) if lang in ("zh-HK", "zh-CN") else None
+    facility_lead = facility_speech(reply, graph, lang) if lang in ("zh-HK", "zh-CN") else None
     speech_lang = "en-US"
     if facility_lead or (lang in ("zh-HK", "zh-CN") and not explicit and (clarification or route is not None)):
         speech_lang = lang
-    speech = facility_lead or spoken_summary(reply, graph, speech_lang)
+    # One renderer decides what is said: model narration if there is any, then the
+    # catalogue (campus_nav/copy.py), then the reply's own words. This call used to be a
+    # chain of `if lang ==` arms spread over three modules.
+    speech = render.speech(reply, graph, speech_lang)
     # A reply may insist on one fact first ("Closed Catering Outlets."). It is part of the
     # answer, not a detail, so it leads and it is spoken; the wording is the handler's, so
     # the lead cannot drift from what actually changed.

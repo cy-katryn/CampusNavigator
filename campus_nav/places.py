@@ -25,6 +25,8 @@ required to say so.
 """
 from __future__ import annotations
 
+import re
+
 # ------------------------------------------------------------------- campus map
 # Campus-map category -> (label the bot uses, canonical capabilities).
 # An empty capability tuple means "this place exists and is navigable, but the bot
@@ -106,6 +108,14 @@ CAPABILITY_LABELS: dict[str, tuple[str, ...]] = {
 }
 
 
+# One matcher for those words, longest first, on word boundaries.
+_AMENITY = re.compile(
+    r"(?<![a-z0-9])(?:"
+    + "|".join(re.escape(phrase) for phrase in sorted(FACILITY_WORDS, key=len, reverse=True))
+    + r")(?![a-z0-9])",
+    re.IGNORECASE,
+)
+
 # Wording that means "a facility", not "the building it sits in".
 SERVICE_WORDS: tuple[str, ...] = (
     "water", "refill", "aed", "defibrillator", "toilet", "washroom", "restroom",
@@ -133,15 +143,11 @@ def amenity_in_text(text: str) -> str:
     the engine can also see the fifty-two services the map publishes and the five hundred
     and eighty-nine places it carries, and the model can see neither.
 
-    Longest wording first, so "water station" is not reported as "water".
+    Longest wording first, so "water station" is not reported as "water", and whole words
+    only: "bank" must not match "embankment", and "aed" must not match inside a longer word.
     """
-    lowered = (text or "").lower()
-    if not lowered:
-        return ""
-    for phrase in sorted(FACILITY_WORDS, key=len, reverse=True):
-        if phrase in lowered:
-            return phrase
-    return ""
+    match = _AMENITY.search(text or "")
+    return match.group(0).lower() if match else ""
 
 
 def facility_capability(word: str) -> str:

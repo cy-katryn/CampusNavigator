@@ -426,6 +426,23 @@ class PlaceIndex:
             hits = [pair for pair in covering
                     if len(lexical.normalise(pair[1].name)) == longest]
 
+        # A facility whose name is "X (Parent)" is a feature *of* Parent, so a phrase that
+        # names the parent names Parent. The English names get this right on their own --
+        # "library" scores the building 0.70 against the defibrillator's 0.39, because the
+        # building's own name carries the word -- but the Chinese names do not: 圖書館 is
+        # the whole published name of neither candidate, and LibCafé, AED (Library) and
+        # Block L (Pao Yue-Kong Library) come back as three equal offers of "which one?".
+        # The map says which is which: a facility whose own head words the phrase does not
+        # contain is a feature standing inside the building that was named, not an
+        # alternative to it. Facilities asked for by their own words ("AED", "診所", the
+        # twenty-five toilets) keep their own answers.
+        buildings = [pair for pair in hits if pair[1].kind != "facility"]
+        if buildings and len(hits) > len(buildings):
+            features = {pair[1].id for pair in hits if pair[1].kind == "facility"
+                        and not (set(lexical.normalise(pair[1].name.split("(")[0])) & said)}
+            if features:
+                hits = [pair for pair in hits if pair[1].id not in features]
+
         # Only the top band is an answer. A weaker neighbour is a worse guess, not an
         # alternative: "library" must not also offer "Block M". Dense scores are cosines
         # and keep the published floor; lexical scores are tiers, so they get a tier.

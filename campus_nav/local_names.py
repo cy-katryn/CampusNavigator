@@ -36,6 +36,38 @@ _LABELS = {
     "Canteen": ("飯堂", "食堂"), "Student Canteen": ("學生飯堂", "学生食堂"),
     "Café": ("咖啡店", "咖啡店"), "Kiosk": ("小食亭", "小吃亭"),
 }
+# The map's own service labels, in both scripts (Mandarin, then Hong Kong Cantonese).
+# They describe the dataset -- a toilet and an accessible toilet are different promises --
+# so they live with the other label translations rather than inside a renderer.
+SERVICE_LABELS: dict[str, tuple[str, str]] = {
+    "water station": ("饮水机", "飲水機"), "toilet": ("洗手间", "洗手間"),
+    "accessible toilet": ("无障碍洗手间", "暢通易達洗手間"), "aed": ("AED", "AED"),
+    "canteen": ("食堂", "飯堂"), "cafe": ("咖啡厅", "咖啡店"), "clinic": ("诊所", "診所"),
+    "bank": ("银行", "銀行"), "bookstore": ("书店", "書店"), "postbox": ("邮筒", "郵筒"),
+    "lactation room": ("哺乳室", "集乳室"), "prayer room": ("祈祷室", "祈禱室"),
+    "bus stop": ("巴士站", "巴士站"), "lift": ("电梯", "升降機"),
+    "faculty / department": ("院系", "學院及學系"), "office": ("办公室", "辦公室"),
+    "lecture theatre": ("演讲厅", "演講廳"), "shop": ("商店", "商店"),
+    "research office": ("研究办公室", "研究辦公室"), "club room": ("活动室", "活動室"),
+    "theatre": ("剧院", "劇院"), "mtr service station": ("港铁服务站", "港鐵服務站"),
+    "car park entrance": ("停车场入口", "停車場入口"), "security office": ("保安室", "保安室"),
+    "flagpole": ("旗杆", "旗桿"), "clock": ("时钟", "時鐘"), "": ("其他地点", "其他地點"),
+}
+
+
+def has_service_label(text: str) -> bool:
+    """Is this one of the labels the map publishes (and therefore worth translating)?"""
+    return (text or "").lower() in SERVICE_LABELS
+
+
+def service_label(text: str, language: str) -> str:
+    """The published service label in the asked-for language, or the label unchanged."""
+    row = SERVICE_LABELS.get((text or "").lower())
+    if row is None or language not in ("zh-HK", "zh-CN"):
+        return text
+    return row[1] if language == "zh-HK" else row[0]
+
+
 _CHINESE = {"zh-HK": 0, "zh-CN": 1}
 _HAN = re.compile(r"[\u3400-\u9fff]")
 _PARENS = re.compile(r"^(.*?)\s*[(（]([^()（）]+)[)）]$")
