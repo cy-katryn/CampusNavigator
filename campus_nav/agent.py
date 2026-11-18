@@ -1,10 +1,9 @@
 """The map assistant: the model chooses the steps, the engine does the arithmetic.
 
-The grammar pipeline (`nlu.py` + `dialogue.py`) reads a sentence into slots and then decides
-what to do with them. This module replaces that division of labour *when a model is
-configured*: the model chooses when to search, when to ask, and when to plan a path. What it
-never does is compute. Every id is validated against the graph and every number in the reply
-came out of a tool result.
+There is one front-end and this is it. When a model is configured it reads the sentence, decides
+which tools to call and writes the answer. There is no parser behind it and no second path to
+fall back to: with no model reachable the assistant says exactly that, because a sentence
+assembled from guessed slots is a claim the engine never measured.
 
 The contract, in the order the model is told to use it::
 
@@ -16,13 +15,11 @@ The contract, in the order the model is told to use it::
     close(place)             -> close a place or link, then re-plan
     reset()                  -> forget the journey
 
-The tools are implemented by calling the same engine functions the grammar path calls, so a
-route planned by the model is the same route planned without it -- including alternatives,
-stops, closures, stair avoidance and the indoor floor note.
-
-Failure is not fatal: `handle()` returns None whenever the model is unreachable, and
-`Dialogue` falls back to the grammar for that turn. The offline demo therefore still works,
-and a dead API costs coverage rather than correctness.
+What the model never does is compute. Every id is validated against the graph, and every tool is
+an engine function, so a route planned by the model is the same route the engine plans on its
+own -- alternatives, stops, closures, stair avoidance and the indoor floor note included. The
+numbers in the sentence it finally writes are checked against those tool results by
+`narrate.problems` before the reply is returned.
 """
 from __future__ import annotations
 
@@ -192,7 +189,7 @@ class MapAgent:
 
     # -- public ------------------------------------------------------------
     def handle(self, text: str, language: str | None = None) -> Reply | None:
-        """Answer one message, or return None so the grammar path answers instead."""
+        """Answer one message, or return None when no model is configured."""
         dialogue = self.dialogue
         client = dialogue.client
         if client is None or not getattr(client.settings, "llm_available", False):
@@ -307,7 +304,7 @@ class MapAgent:
         return [f"sentence refused ({'; '.join(reasons)})"] if reasons else []
 
     def _slots(self) -> Slots:
-        return Slots(intent=self._intent, source="agent")
+        return Slots(intent=self._intent)
 
     def _keep(self, reply: Reply, intent: str) -> None:
         """Remember the structured reply a tool produced; the last one is what gets drawn."""

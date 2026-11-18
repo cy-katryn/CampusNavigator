@@ -1,20 +1,19 @@
-"""DeepSeek chat client -- standard library only.
+"""Chat client -- standard library only, against any OpenAI-compatible endpoint.
 
-Why no `openai` package: DeepSeek speaks the OpenAI-compatible protocol, so a
-single urllib POST is enough. Fewer dependencies means the demo runs on any
-machine without a network install step.
+Why no `openai` package: the wire protocol is OpenAI's, so a single urllib POST is enough.
+Fewer dependencies means the app runs on any machine without a network install step, and the
+endpoint is a setting, not a constant -- DeepSeek is only the default (`config.Settings`).
 
 Design notes that matter for the report
 ---------------------------------------
-* Two callers, one transport. The slot parser asks for JSON in the prompt and
-  parses it defensively (`extract_json`); the map assistant (`agent.py`) uses
-  native tool-calling. Both read the same `LLMResult`.
-* The API rate-limits under load, so 429/5xx are retried with exponential
-  backoff, and every failure is returned as a `LLMResult(ok=False)` instead of
-  raising -- the dialogue layer always has a grammar fallback to fall back to.
-* Nothing here ever routes or answers a factual question. The model's only job is
-  to turn a sentence into slots. The router decides routes; the knowledge base
-  supplies facts. That separation is deliberate and worth saying in Q&A.
+* One caller, one transport. `agent.py` uses native tool-calling: the model asks for a tool,
+  the engine runs it, the result goes back into the conversation. The JSON-slot parser that
+  used to share this client is gone, and `extract_json` went with it.
+* The API rate-limits under load, so 429/5xx are retried with exponential backoff, and every
+  failure comes back as `LLMResult(ok=False)` instead of raising. The caller turns that into
+  "I can't reach the language model right now" -- never into a guess.
+* Nothing here ever routes or answers a factual question. The model chooses tools and writes
+  the sentence; the router decides routes and the knowledge base supplies facts.
 """
 from __future__ import annotations
 
@@ -40,50 +39,6 @@ class LLMResult:
     # answered in prose instead -- which is the normal end of an agent turn.
     tool_calls: list[dict] = field(default_factory=list)
 
-    def json(self) -> dict | None:
-        return extract_json(self.text) if self.ok else None
-
-
-def extract_json(text: str) -> dict | None:
-    """Pull the first JSON object out of a model reply.
-
-    Models wrap JSON in prose or code fences even when told not to, so this is
-    intentionally forgiving: try the whole string, then fenced blocks, then the
-    first balanced {...} span.
-    """
-    if not text:
-        return None
-    candidates = [text.strip()]
-
-    for fence in ("```json", "```"):
-        if fence in text:
-            for part in text.split(fence)[1::2]:
-                candidates.append(part.strip())
-
-    start = text.find("{")
-    if start != -1:
-        depth = 0
-        for i, ch in enumerate(text[start:], start):
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    candidates.append(text[start : i + 1])
-                    break
-
-    for cand in candidates:
-        cand = cand.strip().rstrip(".").strip()
-        if not cand.startswith("{"):
-            continue
-        try:
-            parsed = json.loads(cand)
-            if isinstance(parsed, dict):
-                return parsed
-        except json.JSONDecodeError:
-            continue
-    return None
-
 
 class DeepSeekClient:
     def __init__(self, settings: Settings) -> None:
@@ -101,7 +56,7 @@ class DeepSeekClient:
         tool_choice: str | None = None,
     ) -> LLMResult:
         if not self.settings.llm_available:
-            return LLMResult(ok=False, error="LLM disabled or no DEEPSEEK_API_KEY set")
+            return LLMResult(ok=False, error="the model layer is off or no API key is set")
 
         url = f"{self.settings.base_url}/chat/completions"
         payload = {

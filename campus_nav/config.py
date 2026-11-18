@@ -61,8 +61,8 @@ def load_env(path: Path = ENV_PATH) -> None:
         key = key.strip()
         value = value.strip()
         # A trailing comment documents the setting; it is not part of its value. Without
-        # this, "LLM_ENABLED=1  # 0 = grammar only." sets the flag to a string that is not
-        # "1", and every int() below silently returns its default instead.
+        # this, "LLM_ENABLED=1  # on for the demo" sets the flag to a string that is not "1",
+        # and every int() below silently returns its default instead.
         for marker in (" #", "\t#"):
             if marker in value:
                 value = value.split(marker, 1)[0]

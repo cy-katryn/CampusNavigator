@@ -142,11 +142,11 @@ _GREETING = re.compile(
     r"[s!,.?。，！？~]*$",
     re.I,
 )
-# Phrase matching lives in nlu.py, not here: the model reads the words, the grammar reads
-# them offline, and this layer reads the resulting slots. What is left in this file that looks
-# like language -- the greeting, the thanks, "along the way" -- are *decisions about the
-# conversation* (a greeting is not a place question; a wish attached to the walk in progress
-# is a stop rather than a new journey), and they are documented where they sit.
+# The vocabulary the engine still reads lives in nlu.py; the sentence itself is read by the
+# model. What is left in this file that looks like language -- the greeting, the thanks,
+# "along the way" -- are *decisions about the conversation* (a greeting is not a place
+# question; a wish attached to the walk in progress is a stop rather than a new journey), and
+# they are documented where they sit.
 
 # How much walking a stop found by description may add before it is offered instead of
 # inserted. Four hundred metres is about five minutes: past that, the user is choosing a
@@ -170,13 +170,12 @@ class Dialogue:
         self.client = client
         self.state = SessionState()
         self._places = places
-        # The model-first path (agent.py). Built lazily, because the client may be replaced
-        # when a key is entered in the settings dialog.
+        # The tool-calling front-end (agent.py). Built lazily, because the client may be
+        # replaced when a key is entered in the settings dialog.
         self._agent = None
         # Whether this turn may use the model at all.
         self._llm_ok_for_turn = True
-        # The whole conversation, for the parser only: the engine reads its own state, not
-        # this.
+        # The whole conversation the model sees. The engine reads its own state, not this.
         self.history: list[dict] = []
         # The language the current question is answered in, set per turn from the request.
         # Not part of the journey state: it belongs to the message being answered.
@@ -187,7 +186,8 @@ class Dialogue:
 
     @property
     def places(self) -> PlaceIndex:
-        """The place-name index: embeddings in, Pinecone out. No keyword fallback."""
+        """The place-name index: dense retrieval when keys are set, the lexical scorer
+        otherwise (`config.Settings.vectors_available`)."""
         if self._places is None:
             self._places = PlaceIndex(self.graph, get_settings())
         return self._places

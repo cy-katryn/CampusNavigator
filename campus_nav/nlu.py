@@ -1,24 +1,17 @@
-"""The offline front-end: deterministic rules that turn a sentence into slots.
+"""The vocabulary the engine still owns, and the `Slots` contract it works in.
 
-This is the parser the app uses when no model answers -- no key, no network, a timeout, or
-the assistant returning nothing. `parse_with_grammar` returns a `Slots`, and `Dialogue`
-executes it exactly as it executes the model's tool calls.
-
-The same module holds the shared vocabulary the engine owns: the amenity words, the Chinese
-service table, the day words, the asking-frame stripping, and the `Slots` contract itself.
-There is no place catalogue here and none in any prompt: the resolver names places.
+There is no parser here any more. `parse_with_grammar`, its intent order and its 38 symbol
+tables went when the agent became the only front-end (docs/ARCHITECTURE.md says why), so nothing
+in this file turns a sentence into a plan. What is left is the shared vocabulary -- the amenity
+words, the Chinese service table, the day words, the "re-open it" phrase, the asking-frame test
+-- plus `Slots`, the shape both the model's tool calls and the engine's own readings are
+written into. There is no place catalogue here and none in any prompt: the resolver names
+places.
 """
 from __future__ import annotations
 
-import difflib
 import re
 from dataclasses import dataclass, field
-from typing import Any
-
-from . import lexical
-from .graph import CampusGraph
-from .llm import DeepSeekClient
-from .places import amenity_in_text
 
 @dataclass
 class Slots:
@@ -31,7 +24,7 @@ class Slots:
     # amenity_in_text). This replaced a slot the model had to fill with a label from a list
     # of amenities, which is how "I want to have a swim" came back as "water station".
     need: str = ""
-    item: str = ""           # the amenity this map offers, decided by the engine or grammar
+    item: str = ""           # the amenity this map offers, decided by the engine
     # The places to walk through, in the order the user said them: "through Core P, then
     # Block X" is two. A list rather than one string because that is what the request is --
     # the walk visits each stop in turn, so the order is part of the answer.
@@ -42,7 +35,6 @@ class Slots:
     # day with it, and the timetable still has to answer for that day.
     when: str = ""
     language: str = "en"
-    source: str = "grammar"
     avoid_stairs: bool | None = None  # None keeps the current route preference
     clear_stops: bool = False         # "no stops" / "the direct route"
     along_the_way: bool = False       # the wish is about the walk in progress, not a new one
@@ -56,11 +48,10 @@ class Slots:
         return bool(self.origin_text or self.destination_text)
 
 
-# --- grammar fallback -----------------------------------------------------
-# Every rule below is a *signal*: it answers one yes/no question about the sentence, and
-# parse_with_grammar() decides the intent from those answers in a fixed order. Keeping
-# the decision in one place is what stops a new phrasing from quietly changing an old
-# one -- the order is the specification.
+# --- the words the engine still reads for itself --------------------------
+# Every rule below is a *signal*: it answers one yes/no question about the text, and the
+# engine acts on the answers where the model's own reading has been observed to fail (see
+# agent._STEP_FREE, which exists for exactly that reason).
 
 # "re-open it" lifts every closure, so a demo can recover from its own failure.
 REOPEN = re.compile(

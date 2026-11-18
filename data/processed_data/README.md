@@ -15,8 +15,11 @@ a drawing that is wrong -- the next build will simply reproduce your mistake.
 
 | Node kind | Count | Drawn on the map? |
 |---|---|---|
-| `place` (building, entrance, service) | 191 | yes |
-| `waypoint` | 327 | no -- the end of a link, not a stop |
+| `place` (building, entrance, service) | 84 | yes |
+| `facility` (toilet, AED, water station, outlet) | 245 | yes |
+| `waypoint` | 260 | no -- the end of a link, not a stop |
+
+589 nodes in total, joined by 603 links -- **27 of them flights of steps**, which is what "avoid stairs" excludes.
 
 Each edge carries `metres` (measured along the walkway), `path` (the polyline),
 `stairs` and `covered`. The `meta` block records where every number came from.
